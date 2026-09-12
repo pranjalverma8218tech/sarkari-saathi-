@@ -233,11 +233,107 @@ body {
   font-size: 10px;
 }
 
+.btn-success {
+  background-color: #059669;
+  color: #ffffff;
+}
+
+.btn-success:hover {
+  background-color: #047857;
+}
+
+.session-box {
+  background: #ffffff;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.session-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.session-id {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #047857;
+}
+
+.status-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.status-badge.ready {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.waiting {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.session-summary {
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 8px;
+}
+
 .footer-note {
   font-size: 10px;
   color: #64748b;
   line-height: 1.4;
   text-align: center;
+}
+
+.diag-card {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+.diag-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.diag-row {
+  display: flex;
+  margin-bottom: 3px;
+  line-height: 1.3;
+}
+
+.diag-label {
+  font-weight: 600;
+  color: #475569;
+  width: 95px;
+  flex-shrink: 0;
+}
+
+.diag-val {
+  color: #0f172a;
+  word-break: break-all;
+  flex-grow: 1;
+}
+
+.break-all {
+  word-break: break-all;
 }
 
 .hidden {

@@ -120,6 +120,14 @@ export interface FieldMapping {
 export interface ApplicationSession {
   id: string;
   url: string;
+  inspectedUrl?: string; // Exact last-known inspected URL (never truncated to domain)
+  pageTitle?: string;
+  formActionUrl?: string;
+  targetTabId?: number;
+  targetWindowId?: number;
+  targetOrigin?: string;
+  inspectedAt?: string;
+  inspectionState?: 'active_inspected' | 'lost' | 'fallback_reopened';
   status: 'created' | 'analyzing' | 'waiting_documents' | 'processing' | 'ready_for_review' | 'completed' | 'purged';
   detectedFields: DetectedField[];
   requirements: AnalyzedRequirement[];

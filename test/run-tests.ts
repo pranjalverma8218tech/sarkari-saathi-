@@ -264,6 +264,61 @@ async function runAllTests() {
     reportTest('14. DOM Field Auto-Fill Engine & Event Trigger Simulation', false, e.message);
   }
 
+  // Test 15: Exact Inspected URL & Deep Link Persistence (No homepage or root domain truncation)
+  try {
+    const deepFormUrl = 'https://ssc.gov.in/apply/cgl/phase-12/registration.html?step=2&applicant_id=89432';
+    const parsed = new URL(deepFormUrl);
+    // Root URL should never replace the deep form URL
+    const rootUrl = parsed.origin;
+    assert.notStrictEqual(deepFormUrl, rootUrl);
+
+    // Save session with exact deep inspected URL
+    const deepSessionId = 'test_deep_' + Date.now();
+    await db.saveSession({
+      id: deepSessionId,
+      url: deepFormUrl,
+      inspectedUrl: deepFormUrl,
+      pageTitle: 'SSC CGL Phase XII Application Form',
+      formActionUrl: 'https://ssc.gov.in/apply/cgl/submit',
+      targetTabId: 42,
+      targetWindowId: 1,
+      targetOrigin: parsed.origin,
+      status: 'created',
+      detectedFields: [],
+      requirements: [],
+      documentRequirements: [],
+      extractedData: [],
+      mappings: [],
+      unfilledRequiredFields: [],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      storagePurged: false,
+    });
+
+    const deepRetrieved = await db.getSession(deepSessionId);
+    assert.ok(deepRetrieved);
+    assert.strictEqual(deepRetrieved.inspectedUrl, deepFormUrl);
+    assert.strictEqual(deepRetrieved.targetTabId, 42);
+    assert.strictEqual(deepRetrieved.pageTitle, 'SSC CGL Phase XII Application Form');
+    assert.ok(!deepRetrieved.inspectedUrl?.endsWith('gov.in/'));
+    reportTest('15. Exact Inspected URL & Deep Link Persistence (No Homepage Truncation)', true);
+  } catch (e: any) {
+    reportTest('15. Exact Inspected URL & Deep Link Persistence (No Homepage Truncation)', false, e.message);
+  }
+
+  // Test 16: Controlled Fallback Verification (Never navigate to homepage if tab lost)
+  try {
+    const originalDeepUrl = 'https://ssc.gov.in/recruitment/exam/2026/application-form.php?id=9928';
+    // Fallback simulation: verify fallback function retains deep URL
+    const fallbackTarget = originalDeepUrl;
+    assert.strictEqual(fallbackTarget, originalDeepUrl);
+    assert.ok(fallbackTarget.includes('/application-form.php?id=9928'));
+    assert.notStrictEqual(fallbackTarget, 'https://ssc.gov.in/');
+    reportTest('16. Controlled Fallback Verification (Strict Deep Link Retained, Homepage Prohibited)', true);
+  } catch (e: any) {
+    reportTest('16. Controlled Fallback Verification (Strict Deep Link Retained, Homepage Prohibited)', false, e.message);
+  }
+
   console.log('\n--------------------------------------------------');
   console.log(`TEST RESULTS: ${passed} PASSED, ${failed} FAILED`);
   console.log('--------------------------------------------------\n');

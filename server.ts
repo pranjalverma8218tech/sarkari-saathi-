@@ -68,32 +68,27 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Helper to determine server base URL - strictly enforces canonical public URL and bans localhost/internal URLs
+  // Helper to determine server base URL
   const getBaseUrl = (req?: express.Request): string => {
     // 0. Explicit runtime database/admin configured Public URL
     const runtimeUrl = db.getPublicUrl();
-    if (
-      runtimeUrl &&
-      !runtimeUrl.includes('localhost') &&
-      !runtimeUrl.includes('127.0.0.1') &&
-      !runtimeUrl.includes('ais-dev-') &&
-      !runtimeUrl.includes('ais-pre-')
-    ) {
+    if (runtimeUrl && !runtimeUrl.includes('localhost') && !runtimeUrl.includes('127.0.0.1')) {
       return runtimeUrl;
     }
     // 1. Explicitly configured public app URL in environment
     if (process.env.PUBLIC_APP_URL && process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL') {
       const envUrl = process.env.PUBLIC_APP_URL.replace(/\/$/, '');
-      if (
-        !envUrl.includes('localhost') &&
-        !envUrl.includes('127.0.0.1') &&
-        !envUrl.includes('ais-dev-') &&
-        !envUrl.includes('ais-pre-')
-      ) {
+      if (!envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
         return envUrl;
       }
     }
-    // 2. Canonical production URL
+    // 2. Derive dynamically from active request host header if available
+    if (req && req.get('host')) {
+      const host = req.get('host')!;
+      const proto = (req.headers['x-forwarded-proto'] as string) || (host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https');
+      return `${proto}://${host}`;
+    }
+    // 3. Fallback to canonical production URL
     return CANONICAL_PUBLIC_APP_URL;
   };
 
@@ -487,11 +482,23 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
   // 1. Analyze Government Form with Gemini AI
   app.post('/api/forms/analyze', async (req, res) => {
     try {
-      const { formUrl, detectedFields = [] } = req.body;
+      const {
+        formUrl,
+        inspectedUrl,
+        pageTitle,
+        formActionUrl,
+        detectedFields = [],
+        targetTabId,
+        targetWindowId,
+        targetOrigin,
+        timestamp,
+      } = req.body;
 
       if (!formUrl) {
         return res.status(400).json({ error: 'Government form URL is required.' });
       }
+
+      const exactInspectedUrl = (inspectedUrl || formUrl || '').trim();
 
       // If detectedFields was not provided by the extension, extract standard fields
       // or inspect live-test-form if it's the test URL
@@ -600,6 +607,14 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         const synchronizedSession: ApplicationSession = {
           id: remoteAnalysisResult.sessionId,
           url: formUrl,
+          inspectedUrl: exactInspectedUrl,
+          pageTitle: pageTitle || '',
+          formActionUrl: formActionUrl || '',
+          inspectedAt: timestamp || new Date().toISOString(),
+          inspectionState: 'active_inspected',
+          targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
+          targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
+          targetOrigin: targetOrigin || (formUrl ? new URL(formUrl).origin : undefined),
           status: 'waiting_documents',
           detectedFields: fieldsToAnalyze,
           requirements: remoteAnalysisResult.requirements || [],
@@ -623,6 +638,15 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
           documentRequirements: remoteAnalysisResult.documentRequirements,
           requirements: remoteAnalysisResult.requirements,
           detectedFields: fieldsToAnalyze,
+          targetTabId: synchronizedSession.targetTabId,
+          targetWindowId: synchronizedSession.targetWindowId,
+          targetOrigin: synchronizedSession.targetOrigin,
+          targetUrl: synchronizedSession.url,
+          inspectedUrl: synchronizedSession.inspectedUrl,
+          pageTitle: synchronizedSession.pageTitle,
+          formActionUrl: synchronizedSession.formActionUrl,
+          inspectedAt: synchronizedSession.inspectedAt,
+          inspectionState: synchronizedSession.inspectionState,
         });
       }
 
@@ -709,6 +733,14 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
       const session: ApplicationSession = {
         id: sessionId,
         url: formUrl,
+        inspectedUrl: exactInspectedUrl,
+        pageTitle: pageTitle || '',
+        formActionUrl: formActionUrl || '',
+        inspectedAt: timestamp || new Date().toISOString(),
+        inspectionState: 'active_inspected',
+        targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
+        targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
+        targetOrigin: targetOrigin || (formUrl ? new URL(formUrl).origin : undefined),
         status: 'waiting_documents',
         detectedFields: fieldsToAnalyze,
         requirements: analysis.fieldRequirements,
@@ -732,12 +764,100 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         documentRequirements: docRequirements,
         requirements: analysis.fieldRequirements,
         detectedFields: fieldsToAnalyze,
+        targetTabId: session.targetTabId,
+        targetWindowId: session.targetWindowId,
+        targetOrigin: session.targetOrigin,
+        targetUrl: session.url,
+        inspectedUrl: session.inspectedUrl,
+        pageTitle: session.pageTitle,
+        formActionUrl: session.formActionUrl,
+        inspectedAt: session.inspectedAt,
+        inspectionState: session.inspectionState,
       });
     } catch (err: any) {
       console.error('[API /forms/analyze] Error:', err);
       res.status(500).json({
         error: err.message || 'AI form analysis failed. Please verify your GEMINI_API_KEY.',
       });
+    }
+  });
+
+  // 1b. Associate / Update Target Tab for Active Form Session
+  app.post('/api/sessions/:id/target-tab', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      const {
+        targetTabId,
+        targetWindowId,
+        targetUrl,
+        targetOrigin,
+        inspectedUrl,
+        pageTitle,
+        formActionUrl,
+        inspectedAt,
+        inspectionState,
+      } = req.body;
+      const session = await db.getSession(sessionId);
+
+      if (!session) {
+        return res.status(404).json({ error: 'Application session not found.' });
+      }
+
+      if (typeof targetTabId === 'number') session.targetTabId = targetTabId;
+      if (typeof targetWindowId === 'number') session.targetWindowId = targetWindowId;
+      if (targetUrl && typeof targetUrl === 'string') session.url = targetUrl;
+      if (targetOrigin && typeof targetOrigin === 'string') session.targetOrigin = targetOrigin;
+      if (inspectedUrl && typeof inspectedUrl === 'string') session.inspectedUrl = inspectedUrl;
+      if (pageTitle && typeof pageTitle === 'string') session.pageTitle = pageTitle;
+      if (formActionUrl && typeof formActionUrl === 'string') session.formActionUrl = formActionUrl;
+      if (inspectedAt && typeof inspectedAt === 'string') session.inspectedAt = inspectedAt;
+      if (inspectionState && typeof inspectionState === 'string') session.inspectionState = inspectionState as any;
+
+      await db.saveSession(session);
+
+      res.json({
+        success: true,
+        sessionId: session.id,
+        targetTabId: session.targetTabId,
+        targetWindowId: session.targetWindowId,
+        targetUrl: session.url,
+        targetOrigin: session.targetOrigin,
+        inspectedUrl: session.inspectedUrl,
+        pageTitle: session.pageTitle,
+        formActionUrl: session.formActionUrl,
+        inspectedAt: session.inspectedAt,
+        inspectionState: session.inspectionState,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 1c. Query Target Tab Status
+  app.get('/api/sessions/:id/tab-status', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      const session = await db.getSession(sessionId);
+
+      if (!session) {
+        return res.status(404).json({ error: 'Application session not found.' });
+      }
+
+      res.json({
+        success: true,
+        sessionId: session.id,
+        targetTabId: session.targetTabId,
+        targetWindowId: session.targetWindowId,
+        targetUrl: session.url,
+        targetOrigin: session.targetOrigin,
+        inspectedUrl: session.inspectedUrl,
+        pageTitle: session.pageTitle,
+        formActionUrl: session.formActionUrl,
+        inspectedAt: session.inspectedAt,
+        inspectionState: session.inspectionState,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

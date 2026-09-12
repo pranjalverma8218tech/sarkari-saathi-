@@ -12,6 +12,7 @@ import { ReviewScreen } from './components/ReviewScreen.js';
 import { StartScreen } from './components/StartScreen.js';
 import { StepIndicator } from './components/StepIndicator.js';
 import { ApplicationSession, FieldMapping, LearningFeedbackEvent } from './types.js';
+import { openGovernmentForm } from './lib/extensionBridge.js';
 
 export default function App() {
   // Check if current URL is a customer mobile upload view
@@ -19,6 +20,8 @@ export default function App() {
   const mobileSession = urlParams.get('session');
   const mobileToken = urlParams.get('token');
   const mobileDocName = urlParams.get('doc') || 'Required Document';
+  const urlTabId = urlParams.get('tabId');
+  const urlWinId = urlParams.get('winId');
 
   if (mobileSession && mobileToken) {
     return (
@@ -33,6 +36,12 @@ export default function App() {
   // Operator State
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [targetUrl, setTargetUrl] = useState<string>('');
+  const [targetTabId, setTargetTabId] = useState<number | undefined>(
+    urlTabId ? parseInt(urlTabId, 10) : undefined
+  );
+  const [targetWindowId, setTargetWindowId] = useState<number | undefined>(
+    urlWinId ? parseInt(urlWinId, 10) : undefined
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [analyzingStatus, setAnalyzingStatus] = useState<string>('Analyzing requirements...');
   const [session, setSession] = useState<ApplicationSession | null>(null);
@@ -49,6 +58,12 @@ export default function App() {
           throw new Error('Session not found');
         })
         .then((data: ApplicationSession) => {
+          if (urlTabId && !data.targetTabId) {
+            data.targetTabId = parseInt(urlTabId, 10);
+          }
+          if (urlWinId && !data.targetWindowId) {
+            data.targetWindowId = parseInt(urlWinId, 10);
+          }
           setSession(data);
           setTargetUrl(data.url || '');
           setCurrentStep(data.extractedData && data.extractedData.length > 0 ? 4 : 3);
@@ -58,7 +73,7 @@ export default function App() {
         })
         .finally(() => setIsLoading(false));
     }
-  }, [mobileSession, mobileToken]);
+  }, [mobileSession, mobileToken, urlTabId, urlWinId]);
 
   // Poll session data when on Documents Screen (Step 3) to detect live uploads
   useEffect(() => {
@@ -84,13 +99,34 @@ export default function App() {
 
   // Step 1 -> Step 2: Start Analysis
   const handleStartAnalysis = async (url: string) => {
-    setTargetUrl(url);
+    const resolvedUrl = url.startsWith('/') ? `${window.location.origin}${url}` : url;
+    setTargetUrl(resolvedUrl);
     setCurrentStep(2);
     setIsLoading(true);
     setErrorMessage(null);
-    setAnalyzingStatus('Analyzing requirements with Gemini AI...');
+    setAnalyzingStatus('Connecting to live government portal tab & analyzing requirements with Gemini AI...');
 
     try {
+      // Step 2 requirement: Ask extension to open or locate the exact government portal tab
+      let resolvedTabId = targetTabId;
+      let resolvedWinId = targetWindowId;
+      let resolvedOrigin: string | undefined = undefined;
+
+      try {
+        const extOpenRes = await openGovernmentForm(resolvedUrl);
+        if (extOpenRes.success && typeof extOpenRes.tabId === 'number') {
+          resolvedTabId = extOpenRes.tabId;
+          resolvedWinId = extOpenRes.windowId;
+          setTargetTabId(extOpenRes.tabId);
+          if (extOpenRes.windowId) setTargetWindowId(extOpenRes.windowId);
+          try {
+            resolvedOrigin = new URL(resolvedUrl).origin;
+          } catch {}
+        }
+      } catch (extErr) {
+        console.warn('[Extension Bridge] Could not communicate with extension directly:', extErr);
+      }
+
       const response = await fetch('/api/forms/analyze', {
         method: 'POST',
         headers: {
@@ -98,7 +134,10 @@ export default function App() {
           'X-SmartForm-Origin': window.location.origin,
         },
         body: JSON.stringify({
-          formUrl: url,
+          formUrl: resolvedUrl,
+          targetTabId: resolvedTabId,
+          targetWindowId: resolvedWinId,
+          targetOrigin: resolvedOrigin,
           origin: window.location.origin,
         }),
       });
@@ -109,10 +148,17 @@ export default function App() {
         throw new Error(data.error || 'Failed to analyze government form');
       }
 
+      const sessionTabId = data.targetTabId ?? resolvedTabId;
+      const sessionWinId = data.targetWindowId ?? resolvedWinId;
+      const sessionOrigin = data.targetOrigin ?? resolvedOrigin;
+
       // Construct session from response
       const newSession: ApplicationSession = {
         id: data.sessionId,
-        url: url,
+        url: resolvedUrl,
+        targetTabId: sessionTabId,
+        targetWindowId: sessionWinId,
+        targetOrigin: sessionOrigin,
         status: 'waiting_documents',
         detectedFields: data.detectedFields || [],
         requirements: data.requirements || [],
@@ -299,6 +345,9 @@ export default function App() {
         {/* Screen 4: Processing / Auto-Fill */}
         {currentStep === 4 && session && (
           <AutoFillScreen
+            sessionId={session.id}
+            targetTabId={session.targetTabId}
+            targetWindowId={session.targetWindowId}
             mappings={session.mappings}
             verifiedDocTypes={verifiedDocTypes}
             targetUrl={targetUrl}
@@ -310,8 +359,12 @@ export default function App() {
         {currentStep === 5 && session && (
           <ReviewScreen
             sessionId={session.id}
+            targetTabId={session.targetTabId}
+            targetWindowId={session.targetWindowId}
             mappings={session.mappings}
-            targetUrl={targetUrl}
+            targetUrl={session.url || targetUrl}
+            inspectedUrl={session.inspectedUrl || session.url || targetUrl}
+            pageTitle={session.pageTitle}
             onUpdateMapping={handleUpdateMapping}
             onPurgeStorage={handlePurgeStorage}
             onStartNew={handleStartNew}

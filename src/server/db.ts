@@ -53,33 +53,54 @@ const feedbackRecords: LearningFeedbackEvent[] = [];
 
 // Initialize Supabase Client if credentials exist
 let supabaseClient: SupabaseClient | null = null;
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+let rawSupabaseUrl = process.env.SUPABASE_URL?.trim();
+const supabaseKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)?.trim();
 
-if (supabaseUrl && supabaseKey) {
+if (rawSupabaseUrl && supabaseKey) {
+  // Normalize if user provided just the Supabase project reference ID (e.g. vommzhcbnitdwxwmcpin)
+  let normalizedUrl = rawSupabaseUrl;
+  if (/^[a-z0-9_-]+$/i.test(normalizedUrl)) {
+    normalizedUrl = `https://${normalizedUrl}.supabase.co`;
+  } else if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+    normalizedUrl = `https://${normalizedUrl}`;
+  }
+
+  let isValidHttpUrl = false;
   try {
-    supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: false },
-    });
-    console.log('[Database] Connected to Supabase PostgreSQL & Storage');
+    const parsed = new URL(normalizedUrl);
+    isValidHttpUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    isValidHttpUrl = false;
+  }
 
-    // Auto-ensure required storage buckets exist in Supabase
-    (async () => {
-      try {
-        const requiredBuckets = ['smartform_tokens', 'smartform_sessions', 'private_documents'];
-        for (const bucket of requiredBuckets) {
-          try {
-            await supabaseClient!.storage.createBucket(bucket, { public: false });
-          } catch {
-            // Bucket already exists or created
+  if (isValidHttpUrl) {
+    try {
+      supabaseClient = createClient(normalizedUrl, supabaseKey, {
+        auth: { persistSession: false },
+      });
+      console.log(`[Database] Connected to Supabase at ${normalizedUrl}`);
+
+      // Auto-ensure required storage buckets exist in Supabase
+      (async () => {
+        try {
+          const requiredBuckets = ['smartform_tokens', 'smartform_sessions', 'private_documents'];
+          for (const bucket of requiredBuckets) {
+            try {
+              await supabaseClient!.storage.createBucket(bucket, { public: false });
+            } catch {
+              // Bucket already exists or created
+            }
           }
+        } catch (err) {
+          console.warn('[Database] Supabase bucket initialization notice:', err);
         }
-      } catch (err) {
-        console.warn('[Database] Supabase bucket initialization notice:', err);
-      }
-    })();
-  } catch (err) {
-    console.error('[Database] Failed to initialize Supabase client:', err);
+      })();
+    } catch (err) {
+      console.warn('[Database] Supabase initialization notice, falling back to local transactional storage:', err);
+      supabaseClient = null;
+    }
+  } else {
+    console.warn('[Database] Invalid SUPABASE_URL format provided, falling back to local transactional storage.');
   }
 } else {
   console.log('[Database] Supabase credentials not found in env, using secured server-side transactional storage.');

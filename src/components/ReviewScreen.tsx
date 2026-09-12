@@ -1,20 +1,27 @@
 import React, { useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Edit2,
   ExternalLink,
+  Loader2,
   Lock,
   RotateCcw,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import { FieldMapping, LearningFeedbackEvent } from '../types.js';
+import { autofillForm, focusFormTab, reopenGovernmentForm } from '../lib/extensionBridge';
 
 interface ReviewScreenProps {
   sessionId: string;
+  targetTabId?: number;
+  targetWindowId?: number;
   mappings: FieldMapping[];
   targetUrl: string;
+  inspectedUrl?: string;
+  pageTitle?: string;
   onUpdateMapping: (updatedMappings: FieldMapping[], feedback?: LearningFeedbackEvent) => Promise<void>;
   onPurgeStorage: () => Promise<{ success: boolean; message: string }>;
   onStartNew: () => void;
@@ -22,8 +29,12 @@ interface ReviewScreenProps {
 
 export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   sessionId,
+  targetTabId,
+  targetWindowId,
   mappings,
   targetUrl,
+  inspectedUrl,
+  pageTitle,
   onUpdateMapping,
   onPurgeStorage,
   onStartNew,
@@ -44,6 +55,110 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   const requiresAttention = currentMappings.filter(
     (m) => m.isManualEntry || !m.extractedValue || m.status === 'manual_required'
   );
+
+  // Tab focus & status states
+  const [isSwitchingTab, setIsSwitchingTab] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
+  const [tabActionResult, setTabActionResult] = useState<{
+    success: boolean;
+    message: string;
+    filledCount?: number;
+  } | null>(null);
+  const [tabLostAlert, setTabLostAlert] = useState<{
+    show: boolean;
+    lastKnownUrl: string;
+    pageTitle?: string;
+    error?: string;
+  } | null>(null);
+
+  const exactTargetUrl = inspectedUrl || targetUrl;
+
+  const handleSwitchToLiveTab = async () => {
+    setIsSwitchingTab(true);
+    setTabActionResult(null);
+
+    try {
+      // 1. Focus the exact government portal tab that was inspected
+      // Uses chrome.windows.update and chrome.tabs.update without reload
+      const focusRes = await focusFormTab({
+        targetTabId,
+        targetWindowId,
+        sessionId,
+        expectedUrl: exactTargetUrl,
+      });
+
+      if (focusRes.success) {
+        // Target tab exists and was focused in Chrome without reloading
+        const fillRes = await autofillForm({
+          sessionId,
+          targetTabId: focusRes.tabId || targetTabId,
+          targetWindowId: focusRes.windowId || targetWindowId,
+          mappings: currentMappings,
+        });
+
+        const successMsg = fillRes.success
+          ? `Live Government Form Connected ✓ Using original Chrome tab (#${focusRes.tabId || targetTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
+          : `Live Government Form Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). Review all entries and click Submit manually on the official website.`;
+
+        setTabActionResult({
+          success: true,
+          filledCount: fillRes.filledCount,
+          message: successMsg,
+        });
+        setTabLostAlert(null);
+      } else {
+        // Original tab is closed or unreachable
+        // DO NOT silently open homepage! DO NOT reduce to root URL!
+        setTabLostAlert({
+          show: true,
+          lastKnownUrl: focusRes.lastKnownUrl || exactTargetUrl,
+          pageTitle: pageTitle || 'Inspected Government Form',
+          error: focusRes.message || 'Original Government Form Tab Is No Longer Available',
+        });
+        setTabActionResult({
+          success: false,
+          message: 'Original government form tab was closed or unreachable in Chrome.',
+        });
+      }
+    } catch (err: any) {
+      setTabActionResult({
+        success: false,
+        message: 'Tab navigation failed: ' + (err.message || 'Unknown error'),
+      });
+    } finally {
+      setIsSwitchingTab(false);
+    }
+  };
+
+  const handleReopenExactForm = async () => {
+    if (!tabLostAlert?.lastKnownUrl) return;
+    setIsReopening(true);
+    try {
+      const res = await reopenGovernmentForm({
+        url: tabLostAlert.lastKnownUrl,
+        sessionId,
+      });
+      if (res.success) {
+        setTabActionResult({
+          success: true,
+          message: `Reopened exact inspected form URL in Chrome. Note: If the government portal requires an active login session, please log in manually.`,
+        });
+        setTabLostAlert(null);
+      } else {
+        setTabActionResult({
+          success: false,
+          message: res.message || 'Failed to reopen government form tab in Chrome.',
+        });
+      }
+    } catch (err: any) {
+      setTabActionResult({
+        success: false,
+        message: 'Reopen failed: ' + (err.message || 'Unknown error'),
+      });
+    } finally {
+      setIsReopening(false);
+    }
+  };
 
   const startEdit = (m: FieldMapping) => {
     setEditingId(m.id);
@@ -294,15 +409,20 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
-              <a
-                href={targetUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-xs font-semibold shadow-xs transition-colors"
+              <button
+                id="btn-switch-live-tab"
+                type="button"
+                onClick={handleSwitchToLiveTab}
+                disabled={isSwitchingTab}
+                className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
               >
-                Go to Live Government Form Tab
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+                {isSwitchingTab ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ExternalLink className="w-3.5 h-3.5" />
+                )}
+                Open / Switch to Government Form
+              </button>
 
               <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer select-none bg-slate-800/80 px-3 py-2 rounded-lg border border-slate-700">
                 <input
@@ -314,6 +434,76 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
                 I have verified all fields with the customer
               </label>
             </div>
+
+            {tabActionResult && (
+              <div
+                className={`mt-3 p-3 rounded-lg text-xs flex items-center gap-2 ${
+                  tabActionResult.success
+                    ? 'bg-emerald-950/80 border border-emerald-500/50 text-emerald-200'
+                    : 'bg-amber-950/80 border border-amber-500/50 text-amber-200'
+                }`}
+              >
+                {tabActionResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                )}
+                <span>{tabActionResult.message}</span>
+              </div>
+            )}
+
+            {/* Controlled Fallback Notice when target tab is closed or lost */}
+            {tabLostAlert && (
+              <div
+                id="tab-lost-recovery-banner"
+                className="mt-4 p-4 rounded-xl bg-amber-950/90 border border-amber-500/60 text-amber-100 text-xs"
+              >
+                <div className="flex items-start gap-2.5 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold text-amber-300 text-sm">
+                      Original Government Form Tab Is No Longer Available
+                    </p>
+                    <p className="text-amber-200 mt-1 leading-relaxed">
+                      The original Chrome tab where the form was inspected was closed or unreachable. SmartForm AI does not blindly redirect to the portal homepage, to prevent losing session state, application progress, or authenticated login.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-700 my-2.5">
+                  <div className="text-[11px] text-slate-400 font-medium mb-1">
+                    Inspected Form URL (Deep Link):
+                  </div>
+                  <div className="font-mono text-xs text-amber-200 break-all select-all">
+                    {tabLostAlert.lastKnownUrl}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5 mt-3">
+                  <button
+                    id="btn-reopen-exact-form"
+                    type="button"
+                    onClick={handleReopenExactForm}
+                    disabled={isReopening}
+                    className="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-1.5 rounded-md font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isReopening ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    )}
+                    Reopen Exact Form Page
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTabLostAlert(null)}
+                    className="text-xs text-slate-400 hover:text-white px-2.5 py-1.5 transition-colors cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

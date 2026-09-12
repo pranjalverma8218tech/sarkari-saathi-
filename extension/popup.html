@@ -32,6 +32,32 @@
       <div id="currentTabUrl" class="tab-url"></div>
     </div>
 
+    <!-- Active Session & Live Auto-Fill Card -->
+    <div id="sessionBox" class="session-box hidden">
+      <div class="session-header">
+        <span class="session-id" id="activeSessionDisplay">Session: ...</span>
+        <span class="status-badge waiting" id="activeSessionBadge">Pending</span>
+      </div>
+      <div class="session-summary" id="activeSessionSummary">Checking upload status...</div>
+      <button id="autoFillLiveTabBtn" class="btn btn-success" style="margin-bottom:6px;">
+        ⚡ Auto-Fill Into This Live Tab
+      </button>
+      <button id="focusTabBtn" class="btn btn-secondary" style="font-size:11px; padding:6px 10px;">
+        Focus Government Form Tab
+      </button>
+    </div>
+
+    <!-- Runtime Inspection Diagnostics Card -->
+    <div id="inspectionDiagnosticsCard" class="diag-card hidden">
+      <div class="diag-header">🔍 Inspection Runtime Diagnostics</div>
+      <div class="diag-row"><span class="diag-label">sessionId:</span> <span id="diagSessionId" class="diag-val"></span></div>
+      <div class="diag-row"><span class="diag-label">targetTabId:</span> <span id="diagTargetTabId" class="diag-val"></span></div>
+      <div class="diag-row"><span class="diag-label">targetWindowId:</span> <span id="diagTargetWindowId" class="diag-val"></span></div>
+      <div class="diag-row"><span class="diag-label">inspectedUrl:</span> <span id="diagInspectedUrl" class="diag-val break-all"></span></div>
+      <div class="diag-row"><span class="diag-label">currentUrl:</span> <span id="diagCurrentUrl" class="diag-val break-all"></span></div>
+      <div class="diag-row"><span class="diag-label">pageTitle:</span> <span id="diagPageTitle" class="diag-val"></span></div>
+    </div>
+
     <div id="alertBox" class="alert-box hidden"></div>
 
     <div class="actions">

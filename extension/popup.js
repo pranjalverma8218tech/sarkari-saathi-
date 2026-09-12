@@ -20,15 +20,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fieldCount = document.getElementById('fieldCount');
   const fieldList = document.getElementById('fieldList');
 
-  // 1. Initialize Server URL from chrome.storage.local (Purging any obsolete development values)
+  // 1. Initialize Server URL from chrome.storage.local
   function isObsoleteOrLocalAddress(raw) {
     if (!raw || typeof raw !== 'string') return true;
+    if (raw.includes('your-public-service')) return true;
     try {
-      const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
-      const h = u.hostname.toLowerCase();
-      if (h.includes('local') || h.startsWith('127.') || h.endsWith('.internal')) return true;
-      if (h.includes('ais-dev-') || h.includes('ais-pre-')) return true;
-      if (raw.includes('your-public-service')) return true;
+      new URL(raw.startsWith('http') ? raw : `https://${raw}`);
       return false;
     } catch {
       return true;
@@ -47,11 +44,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.storage.local.get(['serverUrl'], (res) => {
         const stored = res && res.serverUrl;
         const url = sanitizeServerUrl(stored);
-        // If storage had local development host, obsolete domain, or was empty, migrate it immediately
-        if (!stored || isObsoleteOrLocalAddress(stored) || stored !== url) {
+        if (stored && stored === url) {
+          callback(url);
+        } else if (stored && isObsoleteOrLocalAddress(stored)) {
           chrome.storage.local.set({ serverUrl: DEFAULT_SERVER_URL });
+          callback(DEFAULT_SERVER_URL);
+        } else {
+          callback(url);
         }
-        callback(url);
       });
     } else {
       callback(DEFAULT_SERVER_URL);
@@ -129,7 +129,159 @@ document.addEventListener('DOMContentLoaded', async () => {
     alertBox.classList.add('hidden');
   }
 
-  // 4. Inspect Government Form & Send to Backend
+  // 4. Check for active session in chrome.storage.local
+  const sessionBox = document.getElementById('sessionBox');
+  const activeSessionDisplay = document.getElementById('activeSessionDisplay');
+  const activeSessionBadge = document.getElementById('activeSessionBadge');
+  const activeSessionSummary = document.getElementById('activeSessionSummary');
+  const autoFillLiveTabBtn = document.getElementById('autoFillLiveTabBtn');
+  const focusTabBtn = document.getElementById('focusTabBtn');
+
+  let currentStoredSessionId = null;
+  let storedTargetTabId = null;
+  let storedTargetWindowId = null;
+
+  function loadActiveSession() {
+    if (!chrome.storage || !chrome.storage.local) return;
+
+    chrome.storage.local.get(
+      ['activeSessionId', 'activeFormTabId', 'activeFormWindowId', 'activeFormUrl'],
+      (res) => {
+        if (res && res.activeSessionId) {
+          currentStoredSessionId = res.activeSessionId;
+          storedTargetTabId = res.activeFormTabId;
+          storedTargetWindowId = res.activeFormWindowId;
+
+          sessionBox.classList.remove('hidden');
+          activeSessionDisplay.innerText = `Session: ${res.activeSessionId}`;
+
+          getEffectiveServerUrl((serverUrl) => {
+            fetch(`${serverUrl}/api/sessions/${res.activeSessionId}`)
+              .then((r) => r.json())
+              .then((session) => {
+                if (!session || session.error) {
+                  activeSessionSummary.innerText = 'Session expired or not found.';
+                  return;
+                }
+
+                const verifiedDocs = (session.documentRequirements || []).filter(
+                  (d) => d.status === 'verified'
+                ).length;
+                const totalDocs = (session.documentRequirements || []).length;
+                const mappingsCount = (session.mappings || []).filter(
+                  (m) => m.extractedValue && !m.isManualEntry
+                ).length;
+
+                if (mappingsCount > 0 || session.status === 'ready_for_review') {
+                  activeSessionBadge.className = 'status-badge ready';
+                  activeSessionBadge.innerText = 'Ready to Fill';
+                  activeSessionSummary.innerText = `✓ ${verifiedDocs}/${totalDocs} documents verified. ${mappingsCount} fields ready to inject into live DOM.`;
+                  autoFillLiveTabBtn.disabled = false;
+                } else {
+                  activeSessionBadge.className = 'status-badge waiting';
+                  activeSessionBadge.innerText = 'Waiting Upload';
+                  activeSessionSummary.innerText = `Waiting for applicant to scan QR (${verifiedDocs}/${totalDocs} uploaded).`;
+                }
+              })
+              .catch(() => {
+                activeSessionSummary.innerText = 'Could not sync session status with server.';
+              });
+          });
+        }
+      }
+    );
+  }
+
+  loadActiveSession();
+
+  // 5. Direct Live Auto-Fill Button in Popup
+  autoFillLiveTabBtn.addEventListener('click', () => {
+    hideAlert();
+    if (!currentStoredSessionId) {
+      showAlert('No active session found.');
+      return;
+    }
+
+    autoFillLiveTabBtn.disabled = true;
+    autoFillLiveTabBtn.innerText = 'Injecting extracted details into live DOM...';
+
+    getEffectiveServerUrl((serverUrl) => {
+      fetch(`${serverUrl}/api/sessions/${currentStoredSessionId}`)
+        .then((r) => r.json())
+        .then((session) => {
+          if (!session || !session.mappings) {
+            autoFillLiveTabBtn.disabled = false;
+            autoFillLiveTabBtn.innerText = '⚡ Auto-Fill Into This Live Tab';
+            showAlert('Could not retrieve extracted field mappings.');
+            return;
+          }
+
+          // Target tab ID is either the registered tab or current active tab
+          const targetId = storedTargetTabId || (activeTab ? activeTab.id : null);
+
+          chrome.runtime.sendMessage(
+            {
+              action: 'APPLY_AUTO_FILL',
+              targetTabId: targetId,
+              tabId: targetId,
+              sessionId: currentStoredSessionId,
+              payload: {
+                sessionId: currentStoredSessionId,
+                mappings: session.mappings,
+              },
+            },
+            (response) => {
+              autoFillLiveTabBtn.disabled = false;
+              autoFillLiveTabBtn.innerText = '⚡ Auto-Fill Into This Live Tab';
+
+              if (chrome.runtime.lastError || !response || response.status === 'error') {
+                const err = response?.message || chrome.runtime.lastError?.message || 'Auto-fill failed';
+                showAlert(`Auto-fill error: ${err}`);
+                return;
+              }
+
+              const resData = response.results || response;
+              const filled = resData.filledCount || 0;
+              const manual = (resData.manualRequiredFields || []).length;
+
+              activeSessionSummary.innerText = `🎉 Successfully populated ${filled} fields directly into this live tab! (${manual} fields require manual entry).`;
+              showAlert(`Live form updated! ${filled} fields filled. Check form and submit manually.`);
+            }
+          );
+        })
+        .catch((err) => {
+          autoFillLiveTabBtn.disabled = false;
+          autoFillLiveTabBtn.innerText = '⚡ Auto-Fill Into This Live Tab';
+          showAlert(`Error fetching session: ${err.message}`);
+        });
+    });
+  });
+
+  // 6. Focus Government Form Tab Button
+  focusTabBtn.addEventListener('click', () => {
+    const targetId = storedTargetTabId || (activeTab ? activeTab.id : null);
+    if (targetId) {
+      chrome.runtime.sendMessage(
+        {
+          action: 'FOCUS_FORM_TAB',
+          tabId: targetId,
+          windowId: storedTargetWindowId,
+          expectedUrl: storedLastUrl,
+        },
+        (res) => {
+          if (res && !res.success) {
+            showAlert(res.message || 'Original government form tab is no longer open in Chrome.');
+          } else if (res && res.success) {
+            window.close();
+          }
+        }
+      );
+    } else {
+      showAlert('No live form tab recorded in this session.');
+    }
+  });
+
+  // 7. Inspect Government Form & Send to Backend
   inspectBtn.addEventListener('click', async () => {
     hideAlert();
     if (!activeTab || !activeTab.id) {
@@ -214,6 +366,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Send inspected schema to configured server URL
       getEffectiveServerUrl(async (serverUrl) => {
         try {
+          const exactCurrentUrl = (activeTab.url || formStructure.url || '').trim();
+          const exactPageTitle = activeTab.title || formStructure.title || 'Government Form';
+          const formActionUrl = formStructure.formActionUrl || '';
+          const tabOrigin = exactCurrentUrl ? new URL(exactCurrentUrl).origin : '';
+          const timestamp = new Date().toISOString();
+
           const res = await fetch(`${serverUrl}/api/forms/analyze`, {
             method: 'POST',
             headers: {
@@ -221,28 +379,95 @@ document.addEventListener('DOMContentLoaded', async () => {
               'X-SmartForm-Origin': serverUrl,
             },
             body: JSON.stringify({
-              formUrl: activeTab.url,
+              formUrl: exactCurrentUrl,
+              inspectedUrl: exactCurrentUrl,
+              pageTitle: exactPageTitle,
+              formActionUrl: formActionUrl,
               detectedFields: formStructure.fields,
               origin: serverUrl,
+              targetTabId: activeTab.id,
+              targetWindowId: activeTab.windowId,
+              targetOrigin: tabOrigin,
+              timestamp: timestamp,
             }),
           });
 
           const data = await res.json();
 
           if (res.ok && data.sessionId) {
-            // Save active session
+            const currentTabUrlStr = (activeTab.url || exactCurrentUrl).trim();
+
+            // Log inspection runtime diagnostics as required
+            console.log('=== [SmartForm Extension: Inspection Runtime Diagnostics] ===');
+            console.log('sessionId:', data.sessionId);
+            console.log('targetTabId:', activeTab.id);
+            console.log('targetWindowId:', activeTab.windowId);
+            console.log('inspectedUrl:', exactCurrentUrl);
+            console.log('currentUrl:', currentTabUrlStr);
+            console.log('pageTitle:', exactPageTitle);
+            console.log('============================================================');
+
+            // Display inspection runtime diagnostics in extension popup UI
+            const diagCard = document.getElementById('inspectionDiagnosticsCard');
+            const diagSessionId = document.getElementById('diagSessionId');
+            const diagTargetTabId = document.getElementById('diagTargetTabId');
+            const diagTargetWindowId = document.getElementById('diagTargetWindowId');
+            const diagInspectedUrl = document.getElementById('diagInspectedUrl');
+            const diagCurrentUrl = document.getElementById('diagCurrentUrl');
+            const diagPageTitle = document.getElementById('diagPageTitle');
+
+            if (diagCard) {
+              if (diagSessionId) diagSessionId.innerText = data.sessionId;
+              if (diagTargetTabId) diagTargetTabId.innerText = String(activeTab.id);
+              if (diagTargetWindowId) diagTargetWindowId.innerText = String(activeTab.windowId);
+              if (diagInspectedUrl) diagInspectedUrl.innerText = exactCurrentUrl;
+              if (diagCurrentUrl) diagCurrentUrl.innerText = currentTabUrlStr;
+              if (diagPageTitle) diagPageTitle.innerText = exactPageTitle;
+              diagCard.classList.remove('hidden');
+            }
+
+            // Register active government form tab in background service worker
+            chrome.runtime.sendMessage({
+              action: 'REGISTER_FORM_TAB',
+              tabId: activeTab.id,
+              windowId: activeTab.windowId,
+              url: exactCurrentUrl,
+              inspectedUrl: exactCurrentUrl,
+              currentUrl: currentTabUrlStr,
+              pageTitle: exactPageTitle,
+              formActionUrl: formActionUrl,
+              origin: tabOrigin,
+              targetOrigin: tabOrigin,
+              sessionId: data.sessionId,
+              timestamp: timestamp,
+              inspectionState: 'active_inspected',
+              detectedFields: formStructure.fields,
+            });
+
+            // Save active session in chrome.storage.local
             if (chrome.storage && chrome.storage.local) {
               chrome.storage.local.set({
                 activeSessionId: data.sessionId,
-                lastFormUrl: activeTab.url,
+                activeFormTabId: activeTab.id,
+                activeFormWindowId: activeTab.windowId,
+                activeFormUrl: exactCurrentUrl,
+                inspectedUrl: exactCurrentUrl,
+                currentUrl: currentTabUrlStr,
+                pageTitle: exactPageTitle,
+                formActionUrl: formActionUrl,
+                activeFormOrigin: tabOrigin,
+                lastFormUrl: exactCurrentUrl,
+                inspectedAt: timestamp,
+                inspectionState: 'active_inspected',
               });
             }
 
-            // Open or focus operator dashboard using the configured server URL
-            const dashboardUrl = `${serverUrl}/?session=${data.sessionId}&url=${encodeURIComponent(activeTab.url)}`;
+            // Open operator dashboard using the configured server URL with all parameters
+            const dashboardUrl = `${serverUrl}/?session=${data.sessionId}&url=${encodeURIComponent(exactCurrentUrl)}&inspectedUrl=${encodeURIComponent(exactCurrentUrl)}&tabId=${activeTab.id}&winId=${activeTab.windowId}&title=${encodeURIComponent(exactPageTitle)}`;
             chrome.tabs.create({ url: dashboardUrl });
 
             inspectBtn.innerText = 'Form Sent! Opening Dashboard...';
+            loadActiveSession();
             setTimeout(() => {
               inspectBtn.disabled = false;
               inspectBtn.innerText = 'Inspect Form & Open Dashboard';
