@@ -1,0 +1,12 @@
+{
+  "tokenHash": "a5cf0d72129e1fe26c63a2930a9f51d1b3b95b8af206fe8d68194014a7064c99",
+  "rawToken": "bc2493231830b1486618644c3fe21fb3",
+  "sessionId": "test_session_86505d87",
+  "applicationId": "test_session_86505d87",
+  "requirementId": "test_req_b8b4bdad",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-12T07:30:21.721Z",
+  "expiresAt": 1789198161721,
+  "consumedAt": null,
+  "status": "active"
+}

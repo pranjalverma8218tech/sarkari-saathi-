@@ -1,0 +1,12 @@
+{
+  "tokenHash": "0f81a9a3e60c00d10b48741a85663cd8b89b290ade1b65844127b64e5922d1c9",
+  "rawToken": "tok_6ugbw014",
+  "sessionId": "test_sess_8u4qrl",
+  "applicationId": "test_sess_8u4qrl",
+  "requirementId": "req_marksheet",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-12T07:31:15.616Z",
+  "expiresAt": 1789200075616,
+  "consumedAt": "2026-09-12T07:31:15.837Z",
+  "status": "consumed"
+}

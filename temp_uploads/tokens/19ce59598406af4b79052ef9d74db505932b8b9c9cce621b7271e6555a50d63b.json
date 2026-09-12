@@ -1,0 +1,12 @@
+{
+  "tokenHash": "19ce59598406af4b79052ef9d74db505932b8b9c9cce621b7271e6555a50d63b",
+  "rawToken": "diag_bccb0d352667272b",
+  "sessionId": "diag_session_c8f92f28",
+  "applicationId": "diag_session_c8f92f28",
+  "requirementId": "diag_req",
+  "expectedDocumentType": "Diagnostic Document",
+  "createdAt": "2026-09-12T07:31:49.525Z",
+  "expiresAt": 1789198609525,
+  "consumedAt": "2026-09-12T07:31:50.440Z",
+  "status": "consumed"
+}

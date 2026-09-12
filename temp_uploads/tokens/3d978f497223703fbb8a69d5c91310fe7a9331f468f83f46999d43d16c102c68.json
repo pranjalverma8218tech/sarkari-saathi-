@@ -1,0 +1,12 @@
+{
+  "tokenHash": "3d978f497223703fbb8a69d5c91310fe7a9331f468f83f46999d43d16c102c68",
+  "rawToken": "tok_cross_5bab315792f7dc50",
+  "sessionId": "sess_cross_0d32369f",
+  "applicationId": "sess_cross_0d32369f",
+  "requirementId": "req_cross_1",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-12T07:37:45.212Z",
+  "expiresAt": 1789200465212,
+  "consumedAt": null,
+  "status": "active"
+}

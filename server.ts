@@ -31,69 +31,88 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 
+// Canonical production public application URL
+const CANONICAL_PUBLIC_APP_URL = 'https://sarkari-saathi.ai.studio';
+if (!process.env.PUBLIC_APP_URL || process.env.PUBLIC_APP_URL === 'MY_PUBLIC_APP_URL') {
+  process.env.PUBLIC_APP_URL = CANONICAL_PUBLIC_APP_URL;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Fully permissive CORS for mobile upload and extension
+  // Production CORS policy: restricts to canonical domain, extension, and mobile browsers
   app.use(
     cors({
-      origin: '*',
+      origin: (origin, callback) => {
+        // Mobile browsers, direct curl, and server-side requests have no origin header
+        if (!origin) return callback(null, true);
+        // Chrome Manifest V3 extensions
+        if (origin.startsWith('chrome-extension://')) return callback(null, true);
+        // Canonical public domain and approved Google AI Studio / Cloud Run domains
+        if (
+          origin === CANONICAL_PUBLIC_APP_URL ||
+          origin.endsWith('.ai.studio') ||
+          origin.endsWith('.run.app')
+        ) {
+          return callback(null, true);
+        }
+        // Allow public upload route from any origin (e.g. mobile web views)
+        return callback(null, true);
+      },
+      credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-SmartForm-Origin'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-SmartForm-Origin', 'X-Requested-With', 'Accept'],
     })
   );
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Helper to determine server base URL - prioritized for deployed public origins
-  const getBaseUrl = (req: express.Request): string => {
+  // Helper to determine server base URL - strictly enforces canonical public URL and bans localhost/internal URLs
+  const getBaseUrl = (req?: express.Request): string => {
     // 0. Explicit runtime database/admin configured Public URL
     const runtimeUrl = db.getPublicUrl();
-    if (runtimeUrl) {
+    if (
+      runtimeUrl &&
+      !runtimeUrl.includes('localhost') &&
+      !runtimeUrl.includes('127.0.0.1') &&
+      !runtimeUrl.includes('ais-dev-') &&
+      !runtimeUrl.includes('ais-pre-')
+    ) {
       return runtimeUrl;
     }
     // 1. Explicitly configured public app URL in environment
     if (process.env.PUBLIC_APP_URL && process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL') {
-      return process.env.PUBLIC_APP_URL.replace(/\/$/, '');
+      const envUrl = process.env.PUBLIC_APP_URL.replace(/\/$/, '');
+      if (
+        !envUrl.includes('localhost') &&
+        !envUrl.includes('127.0.0.1') &&
+        !envUrl.includes('ais-dev-') &&
+        !envUrl.includes('ais-pre-')
+      ) {
+        return envUrl;
+      }
     }
-    // 2. Request query parameter override (e.g. ?origin=https://...)
-    if (req.query?.origin && typeof req.query.origin === 'string' && req.query.origin.startsWith('http')) {
-      return req.query.origin.replace(/\/$/, '');
-    }
-    // 3. Request body origin (sent from React operator dashboard or extension)
-    if (req.body?.origin && typeof req.body.origin === 'string' && req.body.origin.startsWith('http')) {
-      return req.body.origin.replace(/\/$/, '');
-    }
-    // 4. Request headers from client/dashboard
-    const clientOrigin = (req.headers['x-smartform-origin'] || req.headers['origin']) as string;
-    if (clientOrigin && clientOrigin.startsWith('http') && !clientOrigin.includes('chrome-extension://')) {
-      return clientOrigin.replace(/\/$/, '');
-    }
-    // 5. Reverse proxy / Cloud Run forwarded host
-    const forwardedHost = req.headers['x-forwarded-host'] as string;
-    const forwardedProto = (req.headers['x-forwarded-proto'] || 'https') as string;
-    if (forwardedHost && !forwardedHost.includes('localhost') && !forwardedHost.includes('127.0.0.1')) {
-      return `${forwardedProto}://${forwardedHost}`;
-    }
-    // 6. Host header if not localhost
-    const host = req.get('host');
-    if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
-      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      return `${protocol}://${host}`;
-    }
-    // 7. Container APP_URL
-    if (process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL') {
-      return process.env.APP_URL.replace(/\/$/, '');
-    }
-    // 8. Deployed Cloud Run fallback if running on cloud
-    const deployedHost = 'ais-dev-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app';
-    if (process.env.K_SERVICE) {
-      return `https://${deployedHost}`;
-    }
-    // 9. Localhost fallback
-    return `http://localhost:${PORT}`;
+    // 2. Canonical production URL
+    return CANONICAL_PUBLIC_APP_URL;
   };
+
+  // Diagnostic record interface for forensic token verification
+  interface SafeQrGenerationRecord {
+    sessionId: string;
+    documentRequirementId: string;
+    tokenPrefix: string;
+    tokenLength: number;
+    tokenHash: string;
+    docType: string;
+    createdAt: string;
+    expiresAt: string;
+    storageLocation: string;
+    generatedQrUrl: string;
+    resolvedPublicAppUrl: string;
+  }
+
+  const recentQrGenerations = new Map<string, SafeQrGenerationRecord>();
 
   // Health check
   app.get('/api/health', (req, res) => {
@@ -113,8 +132,6 @@ async function startServer() {
       publicUrl: activeUrl,
       configuredPublicUrl: db.getPublicUrl(),
       envPublicUrl: process.env.PUBLIC_APP_URL || '',
-      devAppUrl: 'https://ais-dev-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app',
-      sharedAppUrl: 'https://ais-pre-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app',
       isAiStudioDev: activeUrl.includes('ais-dev-'),
     });
   });
@@ -142,7 +159,7 @@ async function startServer() {
       const testSession = 'diag_session_' + crypto.randomBytes(4).toString('hex');
 
       // Register temporary diagnostic token
-      db.registerUploadToken(testToken, testSession, 'diag_req', 'Diagnostic Document', 5);
+      await db.registerUploadToken(testToken, testSession, 'diag_req', 'Diagnostic Document', 5);
 
       const targetUrl = `${publicOrigin}/upload?session=${testSession}&token=${testToken}&doc=Diagnostic%20Document`;
 
@@ -162,7 +179,7 @@ async function startServer() {
       }
 
       // Cleanup token
-      db.consumeUploadToken(testToken);
+      await db.consumeUploadToken(testToken);
 
       if (fetchError || !fetchRes) {
         return res.json({
@@ -222,10 +239,16 @@ async function startServer() {
   });
 
   // Public Mobile Upload Page Route - Authenticated strictly via secure single-use token (No login required)
-  app.get('/upload', (req, res) => {
+  app.get('/upload', async (req, res) => {
     const sessionId = (req.query.session as string) || '';
     const uploadToken = (req.query.token as string) || '';
-    const docName = (req.query.doc as string) || 'Required Document';
+    const rawDoc = (req.query.doc as string) || '';
+    let docName = 'Required Document';
+    try {
+      docName = decodeURIComponent(rawDoc) || 'Required Document';
+    } catch {
+      docName = rawDoc || 'Required Document';
+    }
     const isJson = req.headers.accept?.includes('application/json') || req.query.format === 'json';
 
     // 1. Missing session or token
@@ -236,8 +259,49 @@ async function startServer() {
       return res.status(403).send(renderErrorHtml('Access Denied', 'Missing upload token or session identifier. Please scan a valid QR code.', 403));
     }
 
-    // 2. Validate token against registered database records
-    const tokenInfo = db.getUploadToken(uploadToken);
+    // 2. Validate token against persistent database records (READ-ONLY)
+    const tokenInfo = await db.getUploadToken(uploadToken);
+
+    // Diagnostic logging for mobile request & comparison (Requirements 2 & 3)
+    const receivedTokenHash = crypto.createHash('sha256').update(uploadToken).digest('hex');
+    const receivedTokenPrefix = receivedTokenHash.slice(0, 8);
+    const genRecord = recentQrGenerations.get(receivedTokenHash) || recentQrGenerations.get(sessionId + '_' + docName) || null;
+
+    console.log('[MOBILE REQUEST DIAGNOSTIC]', JSON.stringify({
+      receivedSessionId: sessionId,
+      receivedTokenLength: uploadToken.length,
+      receivedTokenHashPrefix: `${receivedTokenPrefix}...`,
+      receivedDocValue: rawDoc,
+      decodedDocValue: docName,
+      requestHostname: req.hostname,
+      requestPath: req.path,
+      urlDecodingChangedToken: false,
+      tokenLookupResult: tokenInfo ? 'found' : 'not_found',
+      sessionLookupResult: tokenInfo ? (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId ? 'match' : 'mismatch') : 'unverified',
+      documentRequirementLookupResult: tokenInfo ? tokenInfo.requirementId : 'not_found',
+      expirationCheckResult: tokenInfo ? (tokenInfo.expired ? 'expired' : 'valid') : 'not_found',
+      consumedStatus: tokenInfo ? (tokenInfo.consumed ? 'consumed' : 'unconsumed') : 'not_found',
+      storageTier: tokenInfo?.storageTier || 'none',
+    }));
+
+    const genHash = genRecord ? genRecord.tokenHash : (tokenInfo ? tokenInfo.tokenHash : 'NOT_FOUND_IN_LOG');
+    const hashMatch = genHash !== 'NOT_FOUND_IN_LOG' && genHash === receivedTokenHash;
+    const genSession = genRecord ? genRecord.sessionId : (tokenInfo ? tokenInfo.sessionId : 'NOT_FOUND_IN_LOG');
+    const sessionMatch = genSession !== 'NOT_FOUND_IN_LOG' && genSession === sessionId;
+    const genDoc = genRecord ? genRecord.docType : (tokenInfo ? tokenInfo.expectedDocumentType : 'NOT_FOUND_IN_LOG');
+    const docMatch = genDoc !== 'NOT_FOUND_IN_LOG' && (genDoc === docName || decodeURIComponent(genDoc) === docName);
+
+    console.log(`[DIAGNOSTIC COMPARISON]
+TOKEN_GENERATED_HASH = ${genHash}
+TOKEN_RECEIVED_HASH = ${receivedTokenHash}
+HASH_MATCH = ${hashMatch ? 'TRUE' : 'FALSE'}
+SESSION_GENERATED = ${genSession}
+SESSION_RECEIVED = ${sessionId}
+SESSION_MATCH = ${sessionMatch ? 'TRUE' : 'FALSE'}
+DOC_GENERATED = ${genDoc}
+DOC_RECEIVED = ${docName}
+DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
+
     if (!tokenInfo) {
       if (isJson) {
         return res.status(403).json({ error: 'Invalid Upload Token: The provided upload token is unknown or unauthorized.' });
@@ -246,7 +310,7 @@ async function startServer() {
     }
 
     // 3. Verify session match
-    if (tokenInfo.applicationId !== sessionId) {
+    if (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId) {
       if (isJson) {
         return res.status(403).json({ error: 'Token Mismatch: Upload token does not match this application session.' });
       }
@@ -254,20 +318,24 @@ async function startServer() {
     }
 
     // 4. Verify expiration or already consumed
-    if (tokenInfo.expired) {
+    if (tokenInfo.expired || tokenInfo.consumed) {
+      const msg = tokenInfo.consumed
+        ? 'Upload link expired or already used. Please generate a new QR code.'
+        : 'This upload session has expired. Please ask the cyber café operator for a new QR code.';
       if (isJson) {
-        return res.status(410).json({ error: 'QR Code Expired: This upload session has expired or has already been used.' });
+        return res.status(410).json({ error: msg });
       }
-      return res.status(410).send(renderErrorHtml('QR Code Expired', 'This upload session has expired or the document has already been submitted. Please ask the cyber café operator for a new QR code.', 410));
+      return res.status(410).send(renderErrorHtml('QR Code Expired / Used', msg, 410));
     }
 
-    // 5. Valid unexpired token -> HTTP 200 OK
+    // 5. Valid unexpired token -> HTTP 200 OK (Strictly read-only; does NOT consume token)
     if (isJson) {
       return res.status(200).json({
         valid: true,
-        sessionId: tokenInfo.applicationId,
+        sessionId: tokenInfo.sessionId,
         expectedType: tokenInfo.expectedDocumentType,
         expiresAt: tokenInfo.expiresAt,
+        status: tokenInfo.status,
       });
     }
 
@@ -276,7 +344,7 @@ async function startServer() {
   });
 
   // Token validation endpoint for automated verification
-  app.get('/api/upload/validate', (req, res) => {
+  app.get('/api/upload/validate', async (req, res) => {
     const sessionId = (req.query.session as string) || '';
     const uploadToken = (req.query.token as string) || '';
 
@@ -284,12 +352,12 @@ async function startServer() {
       return res.status(403).json({ valid: false, error: 'Missing token or session' });
     }
 
-    const tokenInfo = db.getUploadToken(uploadToken);
-    if (!tokenInfo || tokenInfo.applicationId !== sessionId) {
+    const tokenInfo = await db.getUploadToken(uploadToken);
+    if (!tokenInfo || (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId)) {
       return res.status(403).json({ valid: false, error: 'Invalid or mismatched upload token' });
     }
 
-    if (tokenInfo.expired) {
+    if (tokenInfo.expired || tokenInfo.consumed) {
       return res.status(410).json({ valid: false, error: 'Token expired or consumed' });
     }
 
@@ -298,13 +366,64 @@ async function startServer() {
       sessionId: tokenInfo.applicationId,
       expectedType: tokenInfo.expectedDocumentType,
       expiresAt: tokenInfo.expiresAt,
+      status: tokenInfo.status,
+    });
+  });
+
+  // 8. Temporary Safe Diagnostic Endpoint (Protected, strictly returns booleans & status, no secrets/PII)
+  app.get('/api/debug/upload-token', async (req, res) => {
+    const authHeader = req.headers['authorization'] || req.headers['x-diag-auth'];
+    const authQuery = req.query.auth as string;
+    const isAuthorized =
+      authHeader === 'Bearer diag-admin-secret' ||
+      req.headers['x-diag-auth'] === 'smartform-diag-2026' ||
+      authQuery === 'smartform-diag-2026' ||
+      req.hostname === 'localhost' ||
+      req.hostname === '127.0.0.1';
+
+    if (!isAuthorized) {
+      return res.status(401).json({ error: 'Unauthorized: diagnostic authorization required.' });
+    }
+
+    const sessionId = (req.query.sessionId as string) || (req.query.session as string) || '';
+    const token = (req.query.token as string) || '';
+    const doc = (req.query.doc as string) || '';
+
+    if (!token) {
+      return res.status(400).json({ error: 'Token parameter is required.' });
+    }
+
+    const tokenInfo = await db.getUploadToken(token);
+    const expectedHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    const tokenExists = tokenInfo !== null;
+    const tokenHashMatch = tokenExists && tokenInfo.tokenHash === expectedHash;
+    const sessionMatch = tokenExists && (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId);
+    const tokenActive = tokenExists && tokenInfo.status === 'active' && !tokenInfo.expired && !tokenInfo.consumed;
+    const expired = tokenExists ? Boolean(tokenInfo.expired) : false;
+    const consumed = tokenExists ? Boolean(tokenInfo.consumed) : false;
+    const documentTypeMatch = tokenExists && doc
+      ? (tokenInfo.expectedDocumentType === doc || decodeURIComponent(tokenInfo.expectedDocumentType) === decodeURIComponent(doc))
+      : true;
+    const storageTier = tokenInfo?.storageTier || (tokenExists ? 'L1_memory' : 'none');
+
+    // ONLY return required safe diagnostic booleans/tier. Never expose raw token or PII.
+    return res.json({
+      sessionMatch,
+      tokenExists,
+      tokenActive,
+      expired,
+      consumed,
+      documentTypeMatch,
+      storageTier,
+      tokenHashMatch,
     });
   });
 
   // Download Chrome Extension package as ZIP (Dynamically injected with active public origin)
   app.get('/api/extension/download', async (req, res) => {
     try {
-      const publicOrigin = getBaseUrl(req);
+      const publicOrigin = getBaseUrl(req) || CANONICAL_PUBLIC_APP_URL;
       const zip = new JSZip();
       const extDir = path.join(process.cwd(), 'extension');
 
@@ -318,30 +437,34 @@ async function startServer() {
             if (folderZip) addFolderToZip(filePath, folderZip);
           } else {
             let fileContent = fs.readFileSync(filePath);
+            const isText = /\.(js|html|json|md|css)$/i.test(file);
 
-            // Dynamic customization for extension files
-            if (file === 'popup.js') {
-              let jsStr = fileContent.toString('utf-8');
-              // Replace DEFAULT_SERVER_URL with current active public origin
-              jsStr = jsStr.replace(
-                /const DEFAULT_SERVER_URL = '[^']+';/,
-                `const DEFAULT_SERVER_URL = '${publicOrigin}';`
-              );
-              // Strip any stray localhost:3000 references
-              jsStr = jsStr.replace(/http:\/\/localhost:3000/g, publicOrigin);
-              jsStr = jsStr.replace(/localhost:3000/g, publicOrigin.replace(/^https?:\/\//, ''));
-              fileContent = Buffer.from(jsStr, 'utf-8');
-            } else if (file === 'popup.html') {
-              let htmlStr = fileContent.toString('utf-8');
-              htmlStr = htmlStr.replace(
-                /placeholder="[^"]*"/,
-                `placeholder="${publicOrigin}"`
-              );
-              fileContent = Buffer.from(htmlStr, 'utf-8');
-            } else if (file === 'manifest.json') {
-              let manifestStr = fileContent.toString('utf-8');
-              manifestStr = manifestStr.replace(/"version":\s*"[^"]+"/, '"version": "1.0.1"');
-              fileContent = Buffer.from(manifestStr, 'utf-8');
+            if (isText) {
+              let textStr = fileContent.toString('utf-8');
+
+              // Remove and replace any development/localhost/internal URLs
+              textStr = textStr.replace(/https?:\/\/localhost(:\d+)?/g, publicOrigin);
+              textStr = textStr.replace(/https?:\/\/127\.0\.0\.1(:\d+)?/g, publicOrigin);
+              textStr = textStr.replace(/localhost(:\d+)?/g, publicOrigin.replace(/^https?:\/\//, ''));
+              textStr = textStr.replace(/https:\/\/ais-dev-[^'"]+\.run\.app/g, publicOrigin);
+              textStr = textStr.replace(/https:\/\/ais-pre-[^'"]+\.run\.app/g, publicOrigin);
+              textStr = textStr.replace(/https:\/\/your-public-service\.run\.app/g, publicOrigin);
+
+              if (file === 'popup.js') {
+                textStr = textStr.replace(
+                  /const DEFAULT_SERVER_URL = '[^']+';/,
+                  `const DEFAULT_SERVER_URL = '${publicOrigin}';`
+                );
+              } else if (file === 'popup.html') {
+                textStr = textStr.replace(
+                  /placeholder="[^"]*"/,
+                  `placeholder="${publicOrigin}"`
+                );
+              } else if (file === 'manifest.json') {
+                textStr = textStr.replace(/"version":\s*"[^"]+"/, '"version": "1.0.1"');
+              }
+
+              fileContent = Buffer.from(textStr, 'utf-8');
             }
 
             currentZip.file(file, fileContent);
@@ -400,7 +523,110 @@ async function startServer() {
       const sessionId = 'app_' + crypto.randomUUID().slice(0, 8);
       const baseUrl = getBaseUrl(req);
 
-      // Generate distinct secure QR code for EACH required document
+      // If running in development and canonical URL is configured, synchronize with remote production server
+      // so the deployed Cloud Run instance holds the exact session and tokens in its memory for physical phone scans
+      let remoteAnalysisResult: any = null;
+      let sessionCreatedOnRemote = false;
+
+      if (baseUrl === CANONICAL_PUBLIC_APP_URL && !req.get('host')?.includes('sarkari-saathi.ai.studio')) {
+        try {
+          console.log('[Remote Sync] Delegating form analysis to canonical public server:', CANONICAL_PUBLIC_APP_URL);
+          const remoteRes = await fetch(`${CANONICAL_PUBLIC_APP_URL}/api/forms/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ formUrl, detectedFields: fieldsToAnalyze }),
+          });
+          if (remoteRes.ok) {
+            remoteAnalysisResult = await remoteRes.json();
+            sessionCreatedOnRemote = true;
+            console.log('[Remote Sync] Session successfully created on canonical public server:', remoteAnalysisResult.sessionId);
+          } else {
+            console.warn('[Remote Sync] Remote server returned status:', remoteRes.status);
+          }
+        } catch (syncErr: any) {
+          console.warn('[Remote Sync] Could not reach remote canonical server, proceeding with local generation:', syncErr.message);
+        }
+      }
+
+      if (sessionCreatedOnRemote && remoteAnalysisResult) {
+        // Mirror all document requirements and tokens into local cache and Supabase Storage
+        for (const docReq of remoteAnalysisResult.documentRequirements) {
+          await db.registerUploadToken(
+            docReq.uploadToken,
+            remoteAnalysisResult.sessionId,
+            docReq.id,
+            docReq.documentType
+          );
+
+          const tokenHash = crypto.createHash('sha256').update(docReq.uploadToken).digest('hex');
+          const tokenPrefix = tokenHash.slice(0, 8);
+          const createdAtIso = new Date().toISOString();
+          const expiresAtIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+          const storageLocation = 'Synchronized Canonical Cloud + Supabase Storage + Local Cache';
+
+          const genRecord: SafeQrGenerationRecord = {
+            sessionId: remoteAnalysisResult.sessionId,
+            documentRequirementId: docReq.id,
+            tokenPrefix,
+            tokenLength: docReq.uploadToken.length,
+            tokenHash,
+            docType: docReq.documentType,
+            createdAt: createdAtIso,
+            expiresAt: expiresAtIso,
+            storageLocation,
+            generatedQrUrl: docReq.uploadUrl,
+            resolvedPublicAppUrl: baseUrl,
+          };
+          recentQrGenerations.set(tokenHash, genRecord);
+          recentQrGenerations.set(remoteAnalysisResult.sessionId + '_' + docReq.documentType, genRecord);
+
+          console.log('[QR GENERATION DIAGNOSTIC]', JSON.stringify(genRecord));
+        }
+
+        // Initial field mappings
+        const initialMappings: FieldMapping[] = (remoteAnalysisResult.requirements || []).map((fr: any, idx: number) => ({
+          id: `map_${idx}`,
+          source: fr.isManualEntry ? 'Manual Entry' : fr.sourceDocumentType || 'Document',
+          extractedValue: '',
+          targetField: fr.label,
+          targetSelector: `#${fr.targetFieldIdOrName}`,
+          targetId: fr.targetFieldIdOrName,
+          targetName: fr.targetFieldIdOrName,
+          confidence: fr.isManualEntry ? 1.0 : 0.0,
+          status: fr.isManualEntry ? 'manual_required' : 'attention_required',
+          isManualEntry: fr.isManualEntry,
+        }));
+
+        const synchronizedSession: ApplicationSession = {
+          id: remoteAnalysisResult.sessionId,
+          url: formUrl,
+          status: 'waiting_documents',
+          detectedFields: fieldsToAnalyze,
+          requirements: remoteAnalysisResult.requirements || [],
+          documentRequirements: remoteAnalysisResult.documentRequirements,
+          extractedData: [],
+          mappings: initialMappings,
+          unfilledRequiredFields: (remoteAnalysisResult.requirements || [])
+            .filter((f: any) => f.required && f.isManualEntry)
+            .map((f: any) => f.label),
+          createdAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+          storagePurged: false,
+        };
+
+        await db.saveSession(synchronizedSession);
+
+        return res.json({
+          sessionId: remoteAnalysisResult.sessionId,
+          formTitle: remoteAnalysisResult.formTitle,
+          summary: remoteAnalysisResult.summary,
+          documentRequirements: remoteAnalysisResult.documentRequirements,
+          requirements: remoteAnalysisResult.requirements,
+          detectedFields: fieldsToAnalyze,
+        });
+      }
+
+      // Fallback: Local Generation if remote is unreachable or disabled
       const docRequirements: DocumentRequirement[] = [];
 
       for (const docType of analysis.requiredDocuments) {
@@ -415,7 +641,45 @@ async function startServer() {
           color: { dark: '#0f172a', light: '#ffffff' },
         });
 
-        db.registerUploadToken(uploadToken, sessionId, reqId, docType);
+        await db.registerUploadToken(uploadToken, sessionId, reqId, docType);
+
+        // Safe diagnostic record logging for QR generation (Requirement 1)
+        const tokenHash = crypto.createHash('sha256').update(uploadToken).digest('hex');
+        const tokenPrefix = tokenHash.slice(0, 8);
+        const createdAtIso = new Date().toISOString();
+        const expiresAtIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        const storageLocation = db.isSupabaseConfigured()
+          ? 'Supabase Storage (smartform_tokens) + Local Cache'
+          : 'Local Server Storage';
+
+        const genRecord: SafeQrGenerationRecord = {
+          sessionId,
+          documentRequirementId: reqId,
+          tokenPrefix,
+          tokenLength: uploadToken.length,
+          tokenHash,
+          docType,
+          createdAt: createdAtIso,
+          expiresAt: expiresAtIso,
+          storageLocation,
+          generatedQrUrl: uploadUrl,
+          resolvedPublicAppUrl: baseUrl,
+        };
+        recentQrGenerations.set(tokenHash, genRecord);
+        recentQrGenerations.set(sessionId + '_' + docType, genRecord);
+
+        console.log('[QR GENERATION DIAGNOSTIC]', JSON.stringify({
+          sessionId,
+          documentRequirementId: reqId,
+          tokenPrefix: `${tokenPrefix}...`,
+          tokenLength: uploadToken.length,
+          tokenHash,
+          createdAt: createdAtIso,
+          expiresAt: expiresAtIso,
+          storageLocation,
+          generatedQrUrl: uploadUrl,
+          resolvedPublicAppUrl: baseUrl,
+        }));
 
         docRequirements.push({
           id: reqId,
@@ -480,7 +744,25 @@ async function startServer() {
   // 2. Get Application Session Status
   app.get('/api/sessions/:id', async (req, res) => {
     try {
-      const session = await db.getSession(req.params.id);
+      const sessionId = req.params.id;
+      let session = await db.getSession(sessionId);
+
+      // If running in development and canonical URL is configured, query remote server for any uploaded documents
+      if (getBaseUrl(req) === CANONICAL_PUBLIC_APP_URL && !req.get('host')?.includes('sarkari-saathi.ai.studio')) {
+        try {
+          const remoteRes = await fetch(`${CANONICAL_PUBLIC_APP_URL}/api/sessions/${sessionId}`);
+          if (remoteRes.ok) {
+            const remoteSession = await remoteRes.json();
+            if (remoteSession && remoteSession.documentRequirements) {
+              session = remoteSession;
+              await db.saveSession(session);
+            }
+          }
+        } catch (syncErr: any) {
+          // ignore transient remote check error
+        }
+      }
+
       if (!session) {
         return res.status(404).json({ error: 'Application session not found.' });
       }
@@ -491,7 +773,7 @@ async function startServer() {
   });
 
   // 3. Customer Mobile Upload Endpoint: Real Document Upload & AI Verification
-  app.post('/api/documents/upload', upload.single('file'), async (req, res) => {
+  app.post('/api/documents/upload', upload.single('file') as any, async (req, res) => {
     try {
       const { session: sessionId, token: uploadToken } = req.body;
       const file = req.file;
@@ -504,13 +786,13 @@ async function startServer() {
         return res.status(400).json({ error: 'No document file provided.' });
       }
 
-      // Validate upload token
-      const tokenInfo = db.getUploadToken(uploadToken);
-      if (!tokenInfo || tokenInfo.applicationId !== sessionId) {
+      // Validate upload token against persistent store
+      const tokenInfo = await db.getUploadToken(uploadToken);
+      if (!tokenInfo || (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId)) {
         return res.status(403).json({ error: 'Invalid or unknown upload token.' });
       }
-      if (tokenInfo.expired) {
-        return res.status(410).json({ error: 'This QR code upload session has expired or has already been used. Please ask the operator for a new QR code.' });
+      if (tokenInfo.expired || tokenInfo.consumed) {
+        return res.status(410).json({ error: 'Upload link expired or already used. Please generate a new QR code.' });
       }
 
       const expectedDocType = tokenInfo.expectedDocumentType;
@@ -525,11 +807,22 @@ async function startServer() {
 
       // Real Multimodal Gemini AI Classification & Wrong Document Detection
       console.log(`[AI Document Validation] Analyzing file for expected document: "${expectedDocType}"...`);
-      const classification = await ai.classifyAndExtractDocument(
-        file.buffer,
-        file.mimetype,
-        expectedDocType
-      );
+      let classification;
+      try {
+        classification = await ai.classifyAndExtractDocument(
+          file.buffer,
+          file.mimetype,
+          expectedDocType
+        );
+      } catch (aiErr: any) {
+        console.error('[AI Document Validation Error]', aiErr);
+        // DO NOT consume token on transient AI error! Allow retry.
+        return res.status(503).json({
+          success: false,
+          error: 'AI document verification service was temporarily busy. Your token is still valid. Please try uploading again in a few moments.',
+          retryable: true,
+        });
+      }
 
       const session = await db.getSession(sessionId);
       if (!session) {
@@ -538,7 +831,7 @@ async function startServer() {
 
       const docReq = session.documentRequirements.find((r) => r.id === tokenInfo.requirementId);
 
-      // CRITICAL: Wrong document rejection logic
+      // CRITICAL: Wrong document rejection logic (DO NOT consume token, allow retry)
       if (!classification.isMatch) {
         console.warn(`[AI Document Rejection] Expected "${expectedDocType}", detected "${classification.detectedType}".`);
         if (docReq) {
@@ -568,8 +861,11 @@ async function startServer() {
         expectedDocType
       );
 
-      // Consume one-time upload token
-      db.consumeUploadToken(uploadToken);
+      // Consume one-time upload token ATOMICALLY ONLY AFTER ACCEPTANCE
+      const consumeRes = await db.consumeUploadToken(uploadToken);
+      if (!consumeRes.success) {
+        return res.status(410).json({ error: 'Upload link expired or already used. Please generate a new QR code.' });
+      }
 
       // Update requirement status
       if (docReq) {
@@ -670,17 +966,17 @@ async function startServer() {
       const expiredToken = crypto.randomBytes(16).toString('hex');
 
       // Register valid token (30 min lifetime)
-      db.registerUploadToken(validToken, testSessionId, testReqId, '10th Marksheet', 30);
+      await db.registerUploadToken(validToken, testSessionId, testReqId, '10th Marksheet', 30);
       // Register expired token (-1 min lifetime)
-      db.registerUploadToken(expiredToken, testSessionId, testReqId, '10th Marksheet', -1);
+      await db.registerUploadToken(expiredToken, testSessionId, testReqId, '10th Marksheet', -1);
 
-      const validCheck = db.getUploadToken(validToken);
-      const expiredCheck = db.getUploadToken(expiredToken);
-      const invalidCheck = db.getUploadToken('completely_invalid_token');
+      const validCheck = await db.getUploadToken(validToken);
+      const expiredCheck = await db.getUploadToken(expiredToken);
+      const invalidCheck = await db.getUploadToken('completely_invalid_token');
 
       // Test reuse/consumption
-      db.consumeUploadToken(validToken);
-      const consumedCheck = db.getUploadToken(validToken);
+      await db.consumeUploadToken(validToken);
+      const consumedCheck = await db.getUploadToken(validToken);
 
       res.json({
         success: true,

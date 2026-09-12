@@ -1,0 +1,12 @@
+{
+  "tokenHash": "c2f99ad9fa700d4197525acc92d39ee7a610315db9eb8668a3fe747ba5d7299e",
+  "rawToken": "e7d591a46d26b032acb1f9e6a9f16296",
+  "sessionId": "app_f212a342",
+  "applicationId": "app_f212a342",
+  "requirementId": "req_5f1fee6c",
+  "expectedDocumentType": "Identity Proof",
+  "createdAt": "2026-09-12T08:00:54.597Z",
+  "expiresAt": 1789203654597,
+  "consumedAt": null,
+  "status": "active"
+}

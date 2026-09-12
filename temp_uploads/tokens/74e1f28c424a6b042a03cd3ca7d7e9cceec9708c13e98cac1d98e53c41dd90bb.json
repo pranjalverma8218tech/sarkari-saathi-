@@ -1,0 +1,12 @@
+{
+  "tokenHash": "74e1f28c424a6b042a03cd3ca7d7e9cceec9708c13e98cac1d98e53c41dd90bb",
+  "rawToken": "tok_2k99scq3",
+  "sessionId": "test_sess_tna07c",
+  "applicationId": "test_sess_tna07c",
+  "requirementId": "req_marksheet",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-12T07:31:43.684Z",
+  "expiresAt": 1789200103684,
+  "consumedAt": "2026-09-12T07:31:44.683Z",
+  "status": "consumed"
+}

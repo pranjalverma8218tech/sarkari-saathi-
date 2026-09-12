@@ -1,0 +1,58 @@
+{
+  "id": "app_5aaca5c2",
+  "url": "https://upsc.gov.in/recruitment",
+  "status": "waiting_documents",
+  "detectedFields": [
+    {
+      "id": "cand_name",
+      "name": "candidate_name",
+      "label": "Full Name",
+      "fieldType": "text",
+      "required": true
+    }
+  ],
+  "requirements": [
+    {
+      "fieldKey": "candidate_name",
+      "targetFieldIdOrName": "candidate_name",
+      "label": "Full Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract exact legal name as per government ID",
+      "sourceDocumentType": "Identity Proof"
+    }
+  ],
+  "documentRequirements": [
+    {
+      "id": "req_4c837fec",
+      "applicationId": "app_5aaca5c2",
+      "documentType": "Identity Proof",
+      "uploadToken": "823a912e455804828e4a6ea9e27cd442",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_5aaca5c2&token=823a912e455804828e4a6ea9e27cd442&doc=Identity%20Proof",
+      "status": "rejected",
+      "rejectionReason": "Uploaded document does not match \"Identity Proof\". Please upload a clear original copy.",
+      "detectedType": "Mismatched Document"
+    }
+  ],
+  "extractedData": [],
+  "mappings": [
+    {
+      "id": "map_0",
+      "source": "Identity Proof",
+      "extractedValue": "",
+      "targetField": "Full Name",
+      "targetSelector": "#candidate_name",
+      "targetId": "candidate_name",
+      "targetName": "candidate_name",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    }
+  ],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-12T07:59:44.969Z",
+  "expiresAt": "2026-09-12T09:59:44.969Z",
+  "storagePurged": false
+}

@@ -1,0 +1,24 @@
+{
+  "id": "test_sess_tna07c",
+  "url": "https://upsconline.nic.in",
+  "status": "waiting_documents",
+  "detectedFields": [],
+  "requirements": [],
+  "documentRequirements": [
+    {
+      "id": "req_marksheet",
+      "applicationId": "test_sess_tna07c",
+      "documentType": "10th Marksheet",
+      "uploadToken": "tok_2k99scq3",
+      "qrDataUrl": "",
+      "uploadUrl": "",
+      "status": "pending"
+    }
+  ],
+  "extractedData": [],
+  "mappings": [],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-12T07:31:43.387Z",
+  "expiresAt": "2026-09-12T08:31:43.387Z",
+  "storagePurged": false
+}

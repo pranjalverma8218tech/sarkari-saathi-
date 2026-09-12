@@ -1,0 +1,12 @@
+{
+  "tokenHash": "7a39dfa93cb7973dad2746cd42bd0e36ac886f2e1bb94358d7a0b6bd5ab54805",
+  "rawToken": "token_expired_999",
+  "sessionId": "test_app_1789198355311",
+  "applicationId": "test_app_1789198355311",
+  "requirementId": "req_exp",
+  "expectedDocumentType": "Identity Proof",
+  "createdAt": "2026-09-12T07:32:37.486Z",
+  "expiresAt": 1789198297486,
+  "consumedAt": null,
+  "status": "active"
+}

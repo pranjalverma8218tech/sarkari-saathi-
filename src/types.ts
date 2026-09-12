@@ -59,6 +59,34 @@ export interface DocumentRequirement {
   verifiedAt?: string;
 }
 
+export interface UploadTokenRecord {
+  tokenHash: string;
+  rawToken?: string;
+  sessionId: string;
+  applicationId: string;
+  requirementId: string;
+  expectedDocumentType: string;
+  createdAt: string;
+  expiresAt: number;
+  consumedAt: string | null;
+  status: 'active' | 'consumed' | 'expired';
+}
+
+export interface ValidatedTokenInfo {
+  tokenHash: string;
+  sessionId: string;
+  applicationId: string;
+  requirementId: string;
+  expectedDocumentType: string;
+  createdAt: string;
+  expiresAt: number;
+  consumedAt: string | null;
+  status: 'active' | 'consumed' | 'expired';
+  expired: boolean;
+  consumed: boolean;
+  storageTier?: 'L1_memory' | 'L2_disk' | 'L3_supabase_storage';
+}
+
 export interface ExtractedField {
   field: string;
   value: string;

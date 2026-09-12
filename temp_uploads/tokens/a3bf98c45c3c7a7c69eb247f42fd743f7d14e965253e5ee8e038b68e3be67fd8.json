@@ -1,0 +1,12 @@
+{
+  "tokenHash": "a3bf98c45c3c7a7c69eb247f42fd743f7d14e965253e5ee8e038b68e3be67fd8",
+  "rawToken": "9b88d5a9016f02560921eff39a39b090",
+  "sessionId": "app_3867af0a",
+  "applicationId": "app_3867af0a",
+  "requirementId": "req_797bf301",
+  "expectedDocumentType": "Identity Proof (Aadhaar Card)",
+  "createdAt": "2026-09-12T07:30:54.345Z",
+  "expiresAt": 1789201854345,
+  "consumedAt": null,
+  "status": "active"
+}

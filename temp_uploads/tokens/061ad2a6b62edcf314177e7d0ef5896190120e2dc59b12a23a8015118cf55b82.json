@@ -1,0 +1,12 @@
+{
+  "tokenHash": "061ad2a6b62edcf314177e7d0ef5896190120e2dc59b12a23a8015118cf55b82",
+  "rawToken": "c589c4a84f920448119e2e3eb1b98537",
+  "sessionId": "app_3867af0a",
+  "applicationId": "app_3867af0a",
+  "requirementId": "req_d9152748",
+  "expectedDocumentType": "Passport Photograph",
+  "createdAt": "2026-09-12T07:30:54.574Z",
+  "expiresAt": 1789201854574,
+  "consumedAt": null,
+  "status": "active"
+}

@@ -81,8 +81,8 @@ async function runAllTests() {
   const testToken = 'token_valid_123';
   const testReqId = 'req_test_01';
   try {
-    db.registerUploadToken(testToken, testSessionId, testReqId, '10th Marksheet', 30);
-    const tokenInfo = db.getUploadToken(testToken);
+    await db.registerUploadToken(testToken, testSessionId, testReqId, '10th Marksheet', 30);
+    const tokenInfo = await db.getUploadToken(testToken);
     assert.ok(tokenInfo && !tokenInfo.expired);
     assert.strictEqual(tokenInfo.expectedDocumentType, '10th Marksheet');
     reportTest('4. Single-Purpose Upload Token Validation', true);
@@ -197,8 +197,8 @@ async function runAllTests() {
   try {
     const expiredToken = 'token_expired_999';
     // Register token with lifetime -1 minute
-    db.registerUploadToken(expiredToken, testSessionId, 'req_exp', 'Identity Proof', -1);
-    const check = db.getUploadToken(expiredToken);
+    await db.registerUploadToken(expiredToken, testSessionId, 'req_exp', 'Identity Proof', -1);
+    const check = await db.getUploadToken(expiredToken);
     assert.ok(check && check.expired === true);
     reportTest('11. Expired QR Token Invalidation', true);
   } catch (e: any) {

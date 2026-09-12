@@ -1,0 +1,12 @@
+{
+  "tokenHash": "64a3b4e1579ee048fc8468424d0f1ec99d50bb53bff058d004d5bd4842de1f47",
+  "rawToken": "1f4cd47a021731ad765a8e91df6d20dc",
+  "sessionId": "app_3867af0a",
+  "applicationId": "app_3867af0a",
+  "requirementId": "req_6c092c0c",
+  "expectedDocumentType": "Caste / Category Certificate",
+  "createdAt": "2026-09-12T07:30:54.764Z",
+  "expiresAt": 1789201854764,
+  "consumedAt": null,
+  "status": "active"
+}

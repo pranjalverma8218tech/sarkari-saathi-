@@ -213,12 +213,27 @@ export function renderMobileUploadHtml(
           form.style.display = 'none';
           successAlert.style.display = 'block';
           successMessage.innerHTML = '<strong>' + escapeHtml(data.detectedType || expectedDoc) + '</strong> verified successfully (' + Math.round((data.confidence || 0.95) * 100) + '% match).<br><br>The candidate data has been securely transferred to the operator dashboard. You may now close this browser tab.';
-        } else {
+        } else if (res.status === 410) {
+          form.style.display = 'none';
           errorAlert.style.display = 'block';
-          const reason = data.reason || data.message || data.error || 'The uploaded file does not match the required document.';
+          const alertTitle = errorAlert.querySelector('.alert-title');
+          if (alertTitle) alertTitle.innerHTML = '&#9203; Upload Link Expired or Already Used';
+          errorMessage.innerHTML = escapeHtml(data.error || 'Upload link expired or already used. Please generate a new QR code.');
+        } else if (res.status === 422) {
+          errorAlert.style.display = 'block';
+          const alertTitle = errorAlert.querySelector('.alert-title');
+          if (alertTitle) alertTitle.innerHTML = '&#9888; Wrong Document Uploaded';
+          const reason = data.reason || data.message || 'The uploaded file does not match the required document.';
           errorMessage.innerHTML = '<strong>Mismatch Detected:</strong> ' + escapeHtml(reason) + '<br><br>Please select your actual <strong>' + escapeHtml(expectedDoc) + '</strong> and try again.';
           uploadBtn.disabled = false;
           btnText.innerText = 'Try Uploading Again';
+        } else {
+          errorAlert.style.display = 'block';
+          const alertTitle = errorAlert.querySelector('.alert-title');
+          if (alertTitle) alertTitle.innerHTML = '&#9888; Verification Issue';
+          errorMessage.innerHTML = escapeHtml(data.error || data.message || 'The document could not be processed. Your token is still valid. Please retry.');
+          uploadBtn.disabled = false;
+          btnText.innerText = 'Retry Upload';
         }
       } catch (err) {
         errorAlert.style.display = 'block';

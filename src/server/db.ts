@@ -4,6 +4,7 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -13,26 +14,30 @@ import {
   ExtractedField,
   FieldMapping,
   LearningFeedbackEvent,
+  UploadTokenRecord,
+  ValidatedTokenInfo,
 } from '../types.js';
 
 // Local temporary storage folder for documents if Supabase Storage is not yet configured
 const LOCAL_STORAGE_DIR = path.join(process.cwd(), 'temp_uploads');
-if (!fs.existsSync(LOCAL_STORAGE_DIR)) {
-  fs.mkdirSync(LOCAL_STORAGE_DIR, { recursive: true });
+const TOKENS_STORAGE_DIR = path.join(LOCAL_STORAGE_DIR, 'tokens');
+const SESSIONS_STORAGE_DIR = path.join(LOCAL_STORAGE_DIR, 'sessions');
+
+[LOCAL_STORAGE_DIR, TOKENS_STORAGE_DIR, SESSIONS_STORAGE_DIR].forEach((dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
+
+// Helper for hashing tokens (opaque string, no modification)
+function hashToken(tok: string): string {
+  if (!tok || typeof tok !== 'string') return '';
+  return crypto.createHash('sha256').update(tok).digest('hex');
 }
 
 // In-memory / persistent state cache for high-speed cyber café operations
 const inMemorySessions = new Map<string, ApplicationSession>();
-const inMemoryUploadTokens = new Map<
-  string,
-  {
-    applicationId: string;
-    requirementId: string;
-    expectedDocumentType: string;
-    expiresAt: number;
-    used: boolean;
-  }
->();
+const inMemoryUploadTokens = new Map<string, UploadTokenRecord>();
 const storedFiles = new Map<
   string,
   {
@@ -57,6 +62,22 @@ if (supabaseUrl && supabaseKey) {
       auth: { persistSession: false },
     });
     console.log('[Database] Connected to Supabase PostgreSQL & Storage');
+
+    // Auto-ensure required storage buckets exist in Supabase
+    (async () => {
+      try {
+        const requiredBuckets = ['smartform_tokens', 'smartform_sessions', 'private_documents'];
+        for (const bucket of requiredBuckets) {
+          try {
+            await supabaseClient!.storage.createBucket(bucket, { public: false });
+          } catch {
+            // Bucket already exists or created
+          }
+        }
+      } catch (err) {
+        console.warn('[Database] Supabase bucket initialization notice:', err);
+      }
+    })();
   } catch (err) {
     console.error('[Database] Failed to initialize Supabase client:', err);
   }
@@ -64,8 +85,9 @@ if (supabaseUrl && supabaseKey) {
   console.log('[Database] Supabase credentials not found in env, using secured server-side transactional storage.');
 }
 
-// Active public URL configured at runtime or via environment
-let activePublicUrl: string = (process.env.PUBLIC_APP_URL || '').trim().replace(/\/$/, '');
+// Active canonical public URL configured at runtime or via environment
+const CANONICAL_APP_URL = 'https://sarkari-saathi.ai.studio';
+let activePublicUrl: string = (process.env.PUBLIC_APP_URL || CANONICAL_APP_URL).trim().replace(/\/$/, '');
 
 export const db = {
   isSupabaseConfigured(): boolean {
@@ -73,109 +95,296 @@ export const db = {
   },
 
   getPublicUrl(): string {
+    if (!activePublicUrl || activePublicUrl.includes('localhost') || activePublicUrl.includes('127.0.0.1') || activePublicUrl.includes('ais-dev-')) {
+      return CANONICAL_APP_URL;
+    }
     return activePublicUrl;
   },
 
   setPublicUrl(url: string): void {
-    activePublicUrl = (url || '').trim().replace(/\/$/, '');
+    const cleaned = (url || '').trim().replace(/\/$/, '');
+    if (!cleaned || cleaned.includes('localhost') || cleaned.includes('127.0.0.1') || cleaned.includes('ais-dev-')) {
+      activePublicUrl = CANONICAL_APP_URL;
+    } else {
+      activePublicUrl = cleaned;
+    }
   },
 
-  // Save or update an application session
+  // Save or update an application session across L1 memory, L2 disk, and L3 Supabase
   async saveSession(session: ApplicationSession): Promise<void> {
     inMemorySessions.set(session.id, { ...session });
 
+    // L2 Disk Cache
+    try {
+      const filePath = path.join(SESSIONS_STORAGE_DIR, `${session.id}.json`);
+      await fs.promises.writeFile(filePath, JSON.stringify(session, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[Database] Failed to cache session locally:', err);
+    }
+
+    // L3 Supabase Storage for multi-instance synchronization
     if (supabaseClient) {
       try {
-        await supabaseClient.from('applications').upsert({
-          id: session.id,
-          form_url: session.url,
-          status: session.status,
-          updated_at: new Date().toISOString(),
-          expires_at: session.expiresAt,
-        });
-
-        // Upsert document requirements
-        if (session.documentRequirements?.length > 0) {
-          const reqs = session.documentRequirements.map((r) => ({
-            id: r.id,
-            application_id: session.id,
-            document_type: r.documentType,
-            status: r.status,
-            updated_at: new Date().toISOString(),
-          }));
-          await supabaseClient.from('document_requirements').upsert(reqs);
-        }
+        await supabaseClient.storage
+          .from('smartform_sessions')
+          .upload(`sessions/${session.id}.json`, JSON.stringify(session), {
+            contentType: 'application/json',
+            upsert: true,
+          });
       } catch (error) {
-        console.warn('[Database] Supabase upsert error (falling back to memory):', error);
+        console.warn('[Database] Supabase session sync warning:', error);
       }
     }
   },
 
   async getSession(id: string): Promise<ApplicationSession | null> {
+    if (!id) return null;
+
+    // 1. L1 Memory Cache
     const session = inMemorySessions.get(id);
     if (session) return session;
 
+    // 2. L2 Local Disk Cache
+    try {
+      const filePath = path.join(SESSIONS_STORAGE_DIR, `${id}.json`);
+      if (fs.existsSync(filePath)) {
+        const raw = await fs.promises.readFile(filePath, 'utf8');
+        const parsed = JSON.parse(raw);
+        inMemorySessions.set(id, parsed);
+        return parsed;
+      }
+    } catch (err) {
+      console.warn('[Database] Failed to read session from disk:', err);
+    }
+
+    // 3. L3 Supabase Storage cross-instance lookup
     if (supabaseClient) {
       try {
-        const { data, error } = await supabaseClient.from('applications').select('*').eq('id', id).single();
+        const { data, error } = await supabaseClient.storage
+          .from('smartform_sessions')
+          .download(`sessions/${id}.json`);
         if (data && !error) {
-          // Reconstitute from Supabase
-          return {
-            id: data.id,
-            url: data.form_url,
-            status: data.status,
-            detectedFields: [],
-            requirements: [],
-            documentRequirements: [],
-            extractedData: [],
-            mappings: [],
-            unfilledRequiredFields: [],
-            createdAt: data.created_at,
-            expiresAt: data.expires_at,
-            storagePurged: !!data.purged_at,
-            purgedAt: data.purged_at,
-          };
+          const raw = await data.text();
+          const parsed = JSON.parse(raw);
+          inMemorySessions.set(id, parsed);
+          // Cache locally to disk
+          const filePath = path.join(SESSIONS_STORAGE_DIR, `${id}.json`);
+          await fs.promises.writeFile(filePath, raw, 'utf8').catch(() => {});
+          return parsed;
         }
       } catch (err) {
-        console.warn('[Database] Supabase query failed:', err);
+        console.warn('[Database] Supabase session query failed:', err);
       }
     }
+
     return null;
   },
 
   // Register an upload token for a specific document requirement
-  registerUploadToken(
+  async registerUploadToken(
     token: string,
     applicationId: string,
     requirementId: string,
     expectedDocumentType: string,
-    lifetimeMinutes = 30
-  ) {
-    const expiresAt = Date.now() + lifetimeMinutes * 60 * 1000;
-    inMemoryUploadTokens.set(token, {
+    lifetimeMinutes = 60
+  ): Promise<UploadTokenRecord> {
+    const tokenHash = hashToken(token);
+    const now = Date.now();
+    const expiresAt = now + lifetimeMinutes * 60 * 1000;
+
+    const record: UploadTokenRecord = {
+      tokenHash,
+      rawToken: token,
+      sessionId: applicationId,
       applicationId,
       requirementId,
-      expectedDocumentType,
+      expectedDocumentType: expectedDocumentType.trim(),
+      createdAt: new Date(now).toISOString(),
       expiresAt,
-      used: false,
-    });
+      consumedAt: null,
+      status: 'active',
+    };
+
+    // 1. L1 Memory Cache
+    inMemoryUploadTokens.set(token, record);
+    inMemoryUploadTokens.set(tokenHash, record);
+
+    // 2. L2 Local Disk Cache
+    try {
+      const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
+      await fs.promises.writeFile(filePath, JSON.stringify(record, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[Database] Local token disk write failed:', err);
+    }
+
+    // 3. L3 Supabase Storage (Cross-instance accessible for real mobile phones)
+    if (supabaseClient) {
+      try {
+        await supabaseClient.storage
+          .from('smartform_tokens')
+          .upload(`tokens/${tokenHash}.json`, JSON.stringify(record), {
+            contentType: 'application/json',
+            upsert: true,
+          });
+      } catch (err) {
+        console.warn('[Database] Supabase token sync error:', err);
+      }
+    }
+
+    return record;
   },
 
-  getUploadToken(token: string) {
-    const info = inMemoryUploadTokens.get(token);
-    if (!info) return null;
-    if (info.used || Date.now() > info.expiresAt) {
-      return { ...info, expired: true };
+  // Read-only token retrieval and validation. NEVER consumes or modifies the token.
+  async getUploadToken(token: string): Promise<ValidatedTokenInfo | null> {
+    if (!token || typeof token !== 'string') return null;
+    const tokenHash = hashToken(token);
+
+    let storageTier: 'L1_memory' | 'L2_disk' | 'L3_supabase_storage' = 'L1_memory';
+    let record: UploadTokenRecord | null = null;
+    const cached = inMemoryUploadTokens.get(token) || inMemoryUploadTokens.get(tokenHash) || null;
+
+    // If cached in L1 and already consumed or expired, it can never become active again
+    if (cached && (cached.status === 'consumed' || Boolean(cached.consumedAt) || Date.now() > cached.expiresAt)) {
+      record = cached;
+      storageTier = 'L1_memory';
+    } else {
+      // 1. Check L2 Local Disk Cache
+      try {
+        const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
+        if (fs.existsSync(filePath)) {
+          const raw = await fs.promises.readFile(filePath, 'utf8');
+          const diskRecord = JSON.parse(raw);
+          if (diskRecord) {
+            record = diskRecord;
+            storageTier = 'L2_disk';
+          }
+        }
+      } catch (err) {
+        console.warn('[Database] Local token disk read failed:', err);
+      }
+
+      // 2. Check L3 Supabase Storage if record is missing or still active (to catch cross-instance consumption)
+      if ((!record || record.status === 'active') && supabaseClient) {
+        try {
+          const { data, error } = await supabaseClient.storage
+            .from('smartform_tokens')
+            .download(`tokens/${tokenHash}.json`);
+          if (data && !error) {
+            const raw = await data.text();
+            const remoteRecord = JSON.parse(raw);
+            if (remoteRecord) {
+              record = remoteRecord;
+              storageTier = 'L3_supabase_storage';
+              // Sync to disk
+              const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
+              await fs.promises.writeFile(filePath, raw, 'utf8').catch(() => {});
+            }
+          }
+        } catch (err) {
+          // Supabase network warning ignored
+        }
+      }
+
+      // If neither disk nor remote yielded anything, fallback to cached
+      if (!record && cached) {
+        record = cached;
+        storageTier = 'L1_memory';
+      }
+
+      if (record) {
+        inMemoryUploadTokens.set(token, record);
+        inMemoryUploadTokens.set(tokenHash, record);
+      }
     }
-    return { ...info, expired: false };
+
+    if (!record) return null;
+
+    // Check validity state strictly (READ-ONLY)
+    const isConsumed = record.status === 'consumed' || Boolean(record.consumedAt);
+    const isExpiredByTime = Date.now() > record.expiresAt;
+    const isExpired = isConsumed || isExpiredByTime || record.status === 'expired';
+
+    let currentStatus: 'active' | 'consumed' | 'expired' = record.status;
+    if (isConsumed) {
+      currentStatus = 'consumed';
+    } else if (isExpiredByTime) {
+      currentStatus = 'expired';
+    }
+
+    return {
+      tokenHash: record.tokenHash,
+      sessionId: record.sessionId || record.applicationId,
+      applicationId: record.applicationId || record.sessionId,
+      requirementId: record.requirementId,
+      expectedDocumentType: record.expectedDocumentType,
+      createdAt: record.createdAt,
+      expiresAt: record.expiresAt,
+      consumedAt: record.consumedAt,
+      status: currentStatus,
+      expired: isExpired,
+      consumed: isConsumed,
+      storageTier,
+    };
   },
 
-  consumeUploadToken(token: string) {
-    const info = inMemoryUploadTokens.get(token);
-    if (info) {
-      info.used = true;
-      inMemoryUploadTokens.set(token, info);
+  // Atomically consume token. Only succeeds if currently active and unconsumed.
+  async consumeUploadToken(token: string): Promise<{ success: boolean; reason?: string }> {
+    if (!token || typeof token !== 'string') return { success: false, reason: 'missing_token' };
+    const tokenHash = hashToken(token);
+
+    // Check current state
+    const current = await this.getUploadToken(token);
+    if (!current) {
+      return { success: false, reason: 'token_not_found' };
     }
+    if (current.consumed || current.status === 'consumed') {
+      return { success: false, reason: 'already_consumed' };
+    }
+    if (current.expired || current.status === 'expired') {
+      return { success: false, reason: 'expired' };
+    }
+
+    const consumedAt = new Date().toISOString();
+    const updatedRecord: UploadTokenRecord = {
+      tokenHash: current.tokenHash,
+      rawToken: token,
+      sessionId: current.sessionId,
+      applicationId: current.applicationId,
+      requirementId: current.requirementId,
+      expectedDocumentType: current.expectedDocumentType,
+      createdAt: current.createdAt,
+      expiresAt: current.expiresAt,
+      consumedAt,
+      status: 'consumed',
+    };
+
+    // 1. Update L1 Memory Cache
+    inMemoryUploadTokens.set(token, updatedRecord);
+    inMemoryUploadTokens.set(tokenHash, updatedRecord);
+
+    // 2. Update L2 Local Disk Cache
+    try {
+      const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
+      await fs.promises.writeFile(filePath, JSON.stringify(updatedRecord, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[Database] Error updating consumed token on disk:', err);
+    }
+
+    // 3. Update L3 Supabase Storage
+    if (supabaseClient) {
+      try {
+        await supabaseClient.storage
+          .from('smartform_tokens')
+          .upload(`tokens/${tokenHash}.json`, JSON.stringify(updatedRecord), {
+            contentType: 'application/json',
+            upsert: true,
+          });
+      } catch (err) {
+        console.warn('[Database] Error syncing consumed token to Supabase:', err);
+      }
+    }
+
+    return { success: true };
   },
 
   // Save uploaded file to private storage

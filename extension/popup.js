@@ -1,11 +1,10 @@
 /**
  * SmartForm AI - Operator Extension Popup Script
- * Deployed Default: https://ais-dev-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app
  * Persists custom server URLs in chrome.storage.local.
  * Communicates with backend /api/forms/analyze and opens dashboard at configured URL.
  */
 
-const DEFAULT_SERVER_URL = 'https://ais-dev-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app';
+const DEFAULT_SERVER_URL = 'https://sarkari-saathi.ai.studio';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const serverUrlInput = document.getElementById('serverUrlInput');
@@ -22,24 +21,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fieldList = document.getElementById('fieldList');
 
   // 1. Initialize Server URL from chrome.storage.local (Purging any obsolete development values)
-  function isLocalAddress(raw) {
+  function isObsoleteOrLocalAddress(raw) {
     if (!raw || typeof raw !== 'string') return true;
     try {
       const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
       const h = u.hostname.toLowerCase();
-      return h === 'local' + 'host' || h === ['127', '0', '0', '1'].join('.') || h.endsWith('.local');
-    } catch {
+      if (h.includes('local') || h.startsWith('127.') || h.endsWith('.internal')) return true;
+      if (h.includes('ais-dev-') || h.includes('ais-pre-')) return true;
+      if (raw.includes('your-public-service')) return true;
       return false;
+    } catch {
+      return true;
     }
   }
 
   function sanitizeServerUrl(rawUrl) {
-    if (!rawUrl || typeof rawUrl !== 'string') return DEFAULT_SERVER_URL;
-    const trimmed = rawUrl.trim();
-    if (isLocalAddress(trimmed)) {
+    if (!rawUrl || typeof rawUrl !== 'string' || isObsoleteOrLocalAddress(rawUrl)) {
       return DEFAULT_SERVER_URL;
     }
-    return trimmed.replace(/\/$/, '');
+    return rawUrl.trim().replace(/\/$/, '');
   }
 
   function getEffectiveServerUrl(callback) {
@@ -47,8 +47,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.storage.local.get(['serverUrl'], (res) => {
         const stored = res && res.serverUrl;
         const url = sanitizeServerUrl(stored);
-        // If storage had local development host or was empty, clean it up immediately
-        if (!stored || isLocalAddress(stored)) {
+        // If storage had local development host, obsolete domain, or was empty, migrate it immediately
+        if (!stored || isObsoleteOrLocalAddress(stored) || stored !== url) {
           chrome.storage.local.set({ serverUrl: DEFAULT_SERVER_URL });
         }
         callback(url);

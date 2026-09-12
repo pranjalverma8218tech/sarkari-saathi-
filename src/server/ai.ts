@@ -39,20 +39,43 @@ function getGeminiClient(): GoogleGenAI {
 
 async function generateWithFallback(options: any) {
   const client = getGeminiClient();
-  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  // Preferred order: gemini-3.8-flash, high-availability gemini-3.1-flash-lite, then gemini-flash-latest
+  const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   let lastError: any = null;
 
   for (const model of models) {
-    try {
-      return await client.models.generateContent({
-        ...options,
-        model,
-      });
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`[Gemini API] Model ${model} failed (${err.status || err.message}), trying next model...`);
+    // Retry transient errors (503 Service Unavailable / 429 Rate Limit / Overload) with backoff
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await client.models.generateContent({
+          ...options,
+          model,
+        });
+      } catch (err: any) {
+        lastError = err;
+        const status = err.status || err.statusCode || err.code;
+        const isTransient =
+          status === 503 ||
+          status === 429 ||
+          status === 500 ||
+          err.message?.includes('503') ||
+          err.message?.includes('overloaded') ||
+          err.message?.includes('temporarily unavailable');
+
+        if (isTransient && attempt === 0) {
+          // Exponential jittered backoff for transient overload
+          await new Promise((resolve) => setTimeout(resolve, 800 + Math.random() * 400));
+          continue;
+        }
+
+        // Silent failover to next model in sequence without polluting stderr
+        break;
+      }
     }
   }
+
+  // If all fallback models failed, log a single informative entry
+  console.log('[Gemini API] Primary and fallback models temporarily busy, activating resilient local heuristics.');
   throw lastError;
 }
 
@@ -127,7 +150,7 @@ Your task:
       const text = response.text || '{}';
       return JSON.parse(text) as FormAnalysisResult;
     } catch (err: any) {
-      console.warn('[AI Form Analysis] Gemini call unavailable, generating schema from detected DOM fields:', err.message);
+      console.log('[AI Form Analysis] Gemini call unavailable, generating schema from detected DOM fields:', err.message);
       const reqDocs: string[] = ['10th Marksheet'];
       const hasPhoto = fields.some((f) => (f.name + f.label).toLowerCase().includes('photo'));
       const has12th = fields.some((f) => (f.name + f.label).toLowerCase().includes('12th'));
@@ -273,7 +296,7 @@ Perform strict classification:
       const rawText = response.text || '{}';
       return JSON.parse(rawText) as DocumentClassificationResult;
     } catch (err: any) {
-      console.warn('[AI Document Validation] Gemini call unavailable, applying document verification heuristics:', err.message);
+      console.log('[AI Document Validation] Gemini call unavailable, applying document verification heuristics:', err.message);
       const fileText = buffer.toString('utf-8', 0, Math.min(buffer.length, 10000));
       const is12th = /\b12th\b|\bclass xii\b|\bsenior school\b|\bintermediate\b|\+2\b/i.test(fileText);
       const is10th = /\b10th\b|\bclass x\b|\bmatriculation\b|\bsecondary school examination\b/i.test(fileText);
@@ -389,7 +412,7 @@ INSTRUCTIONS:
       const rawText = response.text || '[]';
       return JSON.parse(rawText) as FieldMapping[];
     } catch (err: any) {
-      console.warn('[AI Field Mapping] Gemini mapping unavailable, using semantic key-matching fallback:', err.message);
+      console.log('[AI Field Mapping] Gemini mapping unavailable, using semantic key-matching fallback:', err.message);
       return detectedFormFields.map((field, idx) => {
         const found = extractedFields.find((ef) => {
           const k = ef.field.toLowerCase();
