@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Public Recruitment & Entrance Examination Portal - Live Application Form</title>
+  <style>
+    :root {
+      --primary: #0f4c81;
+      --primary-dark: #092c4c;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --border: #cbd5e1;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --danger: #dc2626;
+      --success: #16a34a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 24px 16px; line-height: 1.5; }
+    .container { max-width: 860px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); overflow: hidden; }
+    .gov-header { background-color: var(--primary); color: white; padding: 20px 24px; border-bottom: 4px solid #f59e0b; }
+    .gov-header h1 { font-size: 20px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .gov-header p { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+    .form-body { padding: 28px 24px; }
+    .notice-box { background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; margin-bottom: 24px; font-size: 13px; color: #1e40af; border-radius: 0 4px 4px 0; }
+    .section-title { font-size: 15px; font-weight: 700; color: var(--primary-dark); padding-bottom: 6px; border-bottom: 2px solid #e2e8f0; margin: 24px 0 16px 0; text-transform: uppercase; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 16px; }
+    .form-grid.full { grid-template-columns: 1fr; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 13px; font-weight: 600; color: #334155; }
+    label .req { color: var(--danger); }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="date"], select, textarea {
+      padding: 10px 12px; font-size: 14px; border: 1px solid var(--border); border-radius: 6px; background-color: #ffffff; color: var(--text); outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15, 76, 129, 0.15); }
+    .radio-group { display: flex; gap: 20px; align-items: center; height: 42px; }
+    .radio-label { font-size: 14px; font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .file-dropzone { border: 2px dashed var(--border); padding: 16px; border-radius: 6px; text-align: center; background: #fafafa; }
+    .btn-submit {
+      background-color: var(--primary); color: white; border: none; padding: 12px 28px; font-size: 15px; font-weight: 600; border-radius: 6px; cursor: pointer; transition: background 0.2s;
+    }
+    .btn-submit:hover { background-color: var(--primary-dark); }
+    .btn-submit:focus { outline: none; box-shadow: 0 0 0 4px rgba(15, 76, 129, 0.3); }
+    .actions-bar { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 12px; align-items: center; }
+    .badge-status { font-size: 12px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="gov-header">
+      <h1>Staff Selection & Entrance Examination Commission</h1>
+      <p>Official Online Application Portal - Session 2026-2027</p>
+    </div>
+
+    <form id="governmentApplicationForm" class="form-body" onsubmit="event.preventDefault(); alert('Form Submitted Successfully by Operator!');">
+      <div class="notice-box">
+        <strong>Important Notice:</strong> Candidate must ensure all educational and personal information matches official certificates exactly. Double-check all entries prior to manual final submission.
+      </div>
+
+      <!-- Section 1: Personal Details -->
+      <div class="section-title">1. Candidate Personal Details</div>
+      
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="candidate_name">Candidate's Full Name <span class="req">*</span></label>
+          <input type="text" id="candidate_name" name="candidate_name" placeholder="As per 10th Marksheet" required autocomplete="name" />
+        </div>
+        <div class="form-group">
+          <label for="father_name">Father's / Guardian's Name <span class="req">*</span></label>
+          <input type="text" id="father_name" name="father_name" placeholder="Full name of father or guardian" required />
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="dob">Date of Birth <span class="req">*</span></label>
+          <input type="date" id="dob" name="dob" required />
+        </div>
+        <div class="form-group">
+          <label>Gender <span class="req">*</span></label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="gender" value="male" required /> Male</label>
+            <label class="radio-label"><input type="radio" name="gender" value="female" /> Female</label>
+            <label class="radio-label"><input type="radio" name="gender" value="other" /> Other</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="category">Reservation Category <span class="req">*</span></label>
+          <select id="category" name="category" required>
+            <option value="">-- Select Category --</option>
+            <option value="General">General (Unreserved)</option>
+            <option value="OBC">Other Backward Classes (OBC)</option>
+            <option value="SC">Scheduled Caste (SC)</option>
+            <option value="ST">Scheduled Tribe (ST)</option>
+            <option value="EWS">Economically Weaker Section (EWS)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="aadhaar_number">Identity Proof / Aadhaar Number</label>
+          <input type="text" id="aadhaar_number" name="aadhaar_number" placeholder="12-digit UID or Govt ID Number" />
+        </div>
+      </div>
+
+      <!-- Section 2: Educational Details -->
+      <div class="section-title">2. Class 10th / Secondary Examination Records</div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="roll_number_10th">10th Roll Number <span class="req">*</span></label>
+          <input type="text" id="roll_number_10th" name="roll_number_10th" placeholder="e.g. 2164821" required />
+        </div>
+        <div class="form-group">
+          <label for="passing_year_10th">10th Passing Year <span class="req">*</span></label>
+          <input type="text" id="passing_year_10th" name="passing_year_10th" placeholder="e.g. 2022" required />
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="board_name_10th">10th Examination Board Name <span class="req">*</span></label>
+          <input type="text" id="board_name_10th" name="board_name_10th" placeholder="e.g. CBSE / State Board" required />
+        </div>
+        <div class="form-group">
+          <label for="marks_percentage_10th">Percentage or CGPA Obtained</label>
+          <input type="text" id="marks_percentage_10th" name="marks_percentage_10th" placeholder="e.g. 84.5%" />
+        </div>
+      </div>
+
+      <!-- Section 3: Contact Details (Manual Entry) -->
+      <div class="section-title">3. Contact Information (Must be entered manually)</div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="mobile_number">Candidate Mobile Number <span class="req">*</span></label>
+          <input type="tel" id="mobile_number" name="mobile_number" placeholder="10-digit mobile number for OTP" required autocomplete="tel" />
+        </div>
+        <div class="form-group">
+          <label for="email_address">Candidate Email Address <span class="req">*</span></label>
+          <input type="email" id="email_address" name="email_address" placeholder="Active personal email address" required autocomplete="email" />
+        </div>
+      </div>
+
+      <div class="form-grid full">
+        <div class="form-group">
+          <label for="permanent_address">Permanent Residential Address</label>
+          <textarea id="permanent_address" name="permanent_address" rows="3" placeholder="House/Flat No, Street, Village/Town, District, State, PIN Code"></textarea>
+        </div>
+      </div>
+
+      <!-- Section 4: Document Attachment -->
+      <div class="section-title">4. Document Upload Attachment</div>
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label for="candidate_photo">Passport Size Photograph (JPG/PNG) <span class="req">*</span></label>
+        <div class="file-dropzone">
+          <input type="file" id="candidate_photo" name="candidate_photo" accept="image/*,.pdf" />
+          <p style="font-size: 11px; color: #64748b; margin-top: 4px;">Max file size 200KB</p>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="actions-bar">
+        <span class="badge-status">Cyber café operator verification required</span>
+        <button type="submit" id="submitApplicationBtn" class="btn-submit">
+          Final Application Submit
+        </button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

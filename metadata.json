@@ -1,0 +1,6 @@
+{
+  "name": "SmartForm AI – AI-Powered Government Form Assistant",
+  "description": "AI-Powered Government Form Assistant for Cyber Cafés with automated form analysis, separate per-document QR upload, multimodal document verification, and Chrome extension auto-fill.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

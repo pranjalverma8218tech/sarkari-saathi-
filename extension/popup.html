@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SmartForm AI</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="header">
+    <div class="title">SmartForm AI</div>
+    <div class="badge">Operator Extension</div>
+  </div>
+
+  <div class="content">
+    <!-- Server Configuration Section -->
+    <div class="server-config">
+      <div class="config-header">
+        <span class="label">SmartForm AI Server URL:</span>
+        <span id="serverStatus" class="status-dot online" title="Server Status"></span>
+      </div>
+      <div class="input-group">
+        <input type="url" id="serverUrlInput" class="form-input" placeholder="https://ais-dev-nfcwnfuyiamsmdfv5jfvmy-746730634616.asia-southeast1.run.app" />
+        <button id="saveServerBtn" class="btn-sm">Save</button>
+      </div>
+      <div id="saveFeedback" class="save-feedback hidden">URL Saved</div>
+    </div>
+
+    <div class="tab-info">
+      <span class="label">Target Government Portal:</span>
+      <div id="currentTabTitle" class="tab-title">Detecting active page...</div>
+      <div id="currentTabUrl" class="tab-url"></div>
+    </div>
+
+    <div id="alertBox" class="alert-box hidden"></div>
+
+    <div class="actions">
+      <button id="inspectBtn" class="btn btn-primary">
+        Inspect Form & Open Dashboard
+      </button>
+      <button id="openAppBtn" class="btn btn-secondary">
+        Open Operator Dashboard
+      </button>
+    </div>
+
+    <div id="resultBox" class="result-box hidden">
+      <div class="result-header">Detected Fields: <span id="fieldCount">0</span></div>
+      <div id="fieldList" class="field-list"></div>
+    </div>
+
+    <div class="footer-note">
+      SmartForm AI Assistant &bull; Manual final submission enforced &bull; Single-use QR codes
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
