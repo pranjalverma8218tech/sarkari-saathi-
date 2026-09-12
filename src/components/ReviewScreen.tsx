@@ -9,17 +9,20 @@ import {
   Lock,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
   Trash2,
 } from 'lucide-react';
-import { FieldMapping, LearningFeedbackEvent } from '../types.js';
-import { autofillForm, focusFormTab, reopenGovernmentForm } from '../lib/extensionBridge';
+import { FieldMapping, LearningFeedbackEvent, WorkflowMode } from '../types.js';
+import { autofillForm, focusFormTab, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
 
 interface ReviewScreenProps {
   sessionId: string;
+  workflowMode?: WorkflowMode;
   targetTabId?: number;
   targetWindowId?: number;
   mappings: FieldMapping[];
   targetUrl: string;
+  pastedUrl?: string;
   inspectedUrl?: string;
   pageTitle?: string;
   onUpdateMapping: (updatedMappings: FieldMapping[], feedback?: LearningFeedbackEvent) => Promise<void>;
@@ -29,10 +32,12 @@ interface ReviewScreenProps {
 
 export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   sessionId,
+  workflowMode,
   targetTabId,
   targetWindowId,
   mappings,
   targetUrl,
+  pastedUrl,
   inspectedUrl,
   pageTitle,
   onUpdateMapping,
@@ -50,6 +55,10 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   } | null>(null);
   const [verifiedByOperator, setVerifiedByOperator] = useState(false);
 
+  // Effective mode resolution
+  const effectiveMode: WorkflowMode =
+    workflowMode || (targetTabId || inspectedUrl ? 'EXTENSION_INSPECTION' : 'URL_PASTE');
+
   // Split into auto-filled vs requires attention
   const autoFilled = currentMappings.filter((m) => !m.isManualEntry && m.extractedValue && m.status !== 'manual_required');
   const requiresAttention = currentMappings.filter(
@@ -59,6 +68,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
   // Tab focus & status states
   const [isSwitchingTab, setIsSwitchingTab] = useState(false);
   const [isReopening, setIsReopening] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(Boolean(targetTabId));
   const [tabActionResult, setTabActionResult] = useState<{
     success: boolean;
     message: string;
@@ -71,7 +81,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
     error?: string;
   } | null>(null);
 
-  const exactTargetUrl = inspectedUrl || targetUrl;
+  const exactTargetUrl = inspectedUrl || pastedUrl || targetUrl;
 
   const handleSwitchToLiveTab = async () => {
     setIsSwitchingTab(true);
@@ -79,7 +89,10 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
 
     try {
       // 1. Focus the exact government portal tab that was inspected
-      // Uses chrome.windows.update and chrome.tabs.update without reload
+      // STRICT MANDATE: Navigation and autofill are two separate operations.
+      // "Go to Live Government Form" means FOCUS EXISTING LIVE TAB.
+      // It does NOT mean NAVIGATE TO A GOVERNMENT URL.
+      // Never use window.location.href or chrome.tabs.create when the target tab exists.
       const focusRes = await focusFormTab({
         targetTabId,
         targetWindowId,
@@ -88,6 +101,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
       });
 
       if (focusRes.success) {
+        setIsLiveConnected(true);
         // Target tab exists and was focused in Chrome without reloading
         const fillRes = await autofillForm({
           sessionId,
@@ -97,8 +111,8 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         });
 
         const successMsg = fillRes.success
-          ? `Live Government Form Connected ✓ Using original Chrome tab (#${focusRes.tabId || targetTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
-          : `Live Government Form Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). Review all entries and click Submit manually on the official website.`;
+          ? `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
+          : `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). Review all entries and click Submit manually on the official website.`;
 
         setTabActionResult({
           success: true,
@@ -107,8 +121,22 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         });
         setTabLostAlert(null);
       } else {
+        // If in URL_PASTE mode and tab was not opened yet:
+        if (effectiveMode === 'URL_PASTE' && !targetTabId) {
+          const openRes = await openGovernmentForm(exactTargetUrl, sessionId);
+          if (openRes.success) {
+            setIsLiveConnected(true);
+            setTabActionResult({
+              success: true,
+              message: `Live Government Page Connected ✓ Opened government form in background tab.`,
+            });
+            return;
+          }
+        }
+
         // Original tab is closed or unreachable
         // DO NOT silently open homepage! DO NOT reduce to root URL!
+        setIsLiveConnected(false);
         setTabLostAlert({
           show: true,
           lastKnownUrl: focusRes.lastKnownUrl || exactTargetUrl,
@@ -117,10 +145,11 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         });
         setTabActionResult({
           success: false,
-          message: 'Original government form tab was closed or unreachable in Chrome.',
+          message: 'Original Government Form Tab Is No Longer Available. (Tab was closed or unreachable in Chrome)',
         });
       }
     } catch (err: any) {
+      setIsLiveConnected(false);
       setTabActionResult({
         success: false,
         message: 'Tab navigation failed: ' + (err.message || 'Unknown error'),
@@ -139,9 +168,10 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         sessionId,
       });
       if (res.success) {
+        setIsLiveConnected(true);
         setTabActionResult({
           success: true,
-          message: `Reopened exact inspected form URL in Chrome. Note: If the government portal requires an active login session, please log in manually.`,
+          message: `Live Government Page Connected ✓ Reopened exact form URL in Chrome. Note: If the government portal requires an active login session, please log in manually.`,
         });
         setTabLostAlert(null);
       } else {
@@ -224,8 +254,28 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
 
   return (
     <div id="review-screen" className="max-w-4xl mx-auto py-8 px-4">
-      {/* Header Notice */}
+      {/* Header Notice & Mode Identification */}
       <div className="text-center mb-8">
+        <div className="flex items-center justify-center gap-2 mb-3">
+          {effectiveMode === 'EXTENSION_INSPECTION' ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Mode 2: Live Page Extension Assistant
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-semibold">
+              Mode 1: URL-Paste Form Assistant
+            </span>
+          )}
+
+          {isLiveConnected && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-full text-xs font-bold">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              Live Government Page Connected ✓
+            </span>
+          )}
+        </div>
+
         <h2 className="text-2xl font-bold text-slate-900 mb-1">
           Form Verification Summary
         </h2>
@@ -414,6 +464,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
                 type="button"
                 onClick={handleSwitchToLiveTab}
                 disabled={isSwitchingTab}
+                title="Switches directly to the already-open form tab in Chrome without reloading or navigating away"
                 className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
               >
                 {isSwitchingTab ? (
@@ -421,7 +472,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
                 ) : (
                   <ExternalLink className="w-3.5 h-3.5" />
                 )}
-                Open / Switch to Government Form
+                Go to Live Government Form
               </button>
 
               <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer select-none bg-slate-800/80 px-3 py-2 rounded-lg border border-slate-700">

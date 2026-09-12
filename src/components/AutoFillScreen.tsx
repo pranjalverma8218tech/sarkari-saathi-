@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   ExternalLink,
@@ -8,26 +9,32 @@ import {
   RefreshCw,
   Sparkles,
 } from 'lucide-react';
-import { FieldMapping } from '../types';
-import { autofillForm, focusFormTab, openGovernmentForm } from '../lib/extensionBridge';
+import { FieldMapping, WorkflowMode } from '../types.js';
+import { autofillForm, focusFormTab, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
 
 interface AutoFillScreenProps {
   sessionId?: string;
+  workflowMode?: WorkflowMode;
   targetTabId?: number;
   targetWindowId?: number;
   mappings: FieldMapping[];
   verifiedDocTypes: string[];
   targetUrl: string;
+  inspectedUrl?: string;
+  pastedUrl?: string;
   onProceedToReview: () => void;
 }
 
 export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
   sessionId,
+  workflowMode,
   targetTabId,
   targetWindowId,
   mappings,
   verifiedDocTypes,
   targetUrl,
+  inspectedUrl,
+  pastedUrl,
   onProceedToReview,
 }) => {
   const [isVerifying, setIsVerifying] = useState(true);
@@ -39,7 +46,18 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
     message?: string;
   } | null>(null);
   const [isSwitchingTab, setIsSwitchingTab] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(Boolean(targetTabId));
   const [switchFeedback, setSwitchFeedback] = useState<string | null>(null);
+  const [tabLostAlert, setTabLostAlert] = useState<{
+    show: boolean;
+    lastKnownUrl: string;
+    error?: string;
+  } | null>(null);
+
+  const effectiveMode: WorkflowMode =
+    workflowMode || (targetTabId || inspectedUrl ? 'EXTENSION_INSPECTION' : 'URL_PASTE');
+  const exactTargetUrl = inspectedUrl || pastedUrl || targetUrl;
 
   const runAutoFill = async () => {
     setIsVerifying(true);
@@ -55,6 +73,7 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
       });
 
       if (result.success) {
+        setIsLiveConnected(true);
         setVerificationResult({
           success: true,
           filledCount: result.filledCount,
@@ -93,35 +112,68 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
   const handleOpenOrSwitchTab = async () => {
     setIsSwitchingTab(true);
     setSwitchFeedback(null);
+    setTabLostAlert(null);
 
     try {
+      // Focus existing live tab without reloading
       const focusRes = await focusFormTab({
         targetTabId,
         targetWindowId,
         sessionId,
+        expectedUrl: exactTargetUrl,
       });
 
       if (focusRes.success) {
-        setSwitchFeedback('Focus switched to live government form tab in Chrome.');
+        setIsLiveConnected(true);
+        setSwitchFeedback('Live Government Page Connected ✓ Switched to live government form tab in Chrome.');
       } else {
-        // Try opening the form tab if not currently open
-        const openRes = await openGovernmentForm(targetUrl, sessionId);
-        if (openRes.success) {
-          setSwitchFeedback('Government form tab opened and registered.');
-          // Retry autofill
-          await runAutoFill();
-        } else {
-          setSwitchFeedback(
-            openRes.message ||
-              'Could not reach tab. Ensure SmartForm AI Chrome Extension is loaded in chrome://extensions.'
-          );
+        // Mode 1: if tab hasn't been opened yet, open it
+        if (effectiveMode === 'URL_PASTE' && !targetTabId) {
+          const openRes = await openGovernmentForm(exactTargetUrl, sessionId);
+          if (openRes.success) {
+            setIsLiveConnected(true);
+            setSwitchFeedback('Live Government Page Connected ✓ Government form tab opened and registered.');
+            await runAutoFill();
+            return;
+          }
         }
+
+        // Mode 2 (or tab closed): Never navigate away or open homepage
+        setIsLiveConnected(false);
+        setTabLostAlert({
+          show: true,
+          lastKnownUrl: focusRes.lastKnownUrl || exactTargetUrl,
+          error: 'Original Government Form Tab Is No Longer Available',
+        });
+        setSwitchFeedback('Original government form tab was closed or unreachable in Chrome.');
       }
     } catch (err: any) {
+      setIsLiveConnected(false);
       setSwitchFeedback('Tab navigation error: ' + err.message);
     } finally {
       setIsSwitchingTab(false);
-      setTimeout(() => setSwitchFeedback(null), 5000);
+    }
+  };
+
+  const handleReopenExactForm = async () => {
+    if (!tabLostAlert?.lastKnownUrl) return;
+    setIsReopening(true);
+    try {
+      const res = await reopenGovernmentForm({
+        url: tabLostAlert.lastKnownUrl,
+        sessionId,
+      });
+      if (res.success) {
+        setIsLiveConnected(true);
+        setSwitchFeedback('Live Government Page Connected ✓ Reopened exact form URL in Chrome.');
+        setTabLostAlert(null);
+      } else {
+        setSwitchFeedback(res.message || 'Failed to reopen government form tab in Chrome.');
+      }
+    } catch (err: any) {
+      setSwitchFeedback('Reopen failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsReopening(false);
     }
   };
 
@@ -129,6 +181,27 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
 
   return (
     <div id="autofill-screen" className="max-w-xl mx-auto py-10 px-6 text-center">
+      {/* Mode Identification Badge */}
+      <div className="flex items-center justify-center gap-2 mb-4">
+        {effectiveMode === 'EXTENSION_INSPECTION' ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Mode 2: Live Page Extension Assistant
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-semibold">
+            Mode 1: URL-Paste Form Assistant
+          </span>
+        )}
+
+        {isLiveConnected && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-full text-xs font-bold">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            Live Government Page Connected ✓
+          </span>
+        )}
+      </div>
+
       <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
         <Sparkles className="w-6 h-6" />
       </div>
@@ -144,7 +217,7 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
       <div className="mb-6 p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700 flex flex-col sm:flex-row items-center justify-between gap-2 text-left">
         <div className="truncate max-w-sm">
           <span className="font-semibold text-slate-900">Target Portal: </span>
-          <span className="font-mono text-slate-600">{targetUrl}</span>
+          <span className="font-mono text-slate-600">{exactTargetUrl}</span>
         </div>
         {targetTabId ? (
           <span className="inline-flex items-center gap-1 text-[11px] font-mono bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
@@ -202,7 +275,7 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
         </div>
       )}
 
-      {/* Unverified / Connection Pending Display (Honest Status - No False Claims) */}
+      {/* Unverified / Connection Pending Display */}
       {!isVerifying && verificationResult && !verificationResult.success && (
         <div className="p-6 rounded-xl border border-amber-200 bg-amber-50/70 shadow-xs mb-6 text-left">
           <div className="flex items-start gap-3">
@@ -215,9 +288,59 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
                 {verificationResult.error}
               </p>
               <p className="text-xs text-slate-600">
-                To complete live DOM injection, make sure the SmartForm AI Chrome Extension is active, or click below to open the portal in Chrome.
+                To complete live DOM injection, ensure the SmartForm AI Chrome Extension is active, or click below to focus the portal in Chrome.
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab Lost Alert in AutoFillScreen */}
+      {tabLostAlert && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-950/90 border border-amber-500/60 text-amber-100 text-xs text-left">
+          <div className="flex items-start gap-2.5 mb-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-bold text-amber-300 text-sm">
+                Original Government Form Tab Is No Longer Available
+              </p>
+              <p className="text-amber-200 mt-1 leading-relaxed">
+                The original Chrome tab where the form was inspected was closed or unreachable. SmartForm AI does not blindly redirect to the portal homepage, to prevent losing session state, application progress, or authenticated login.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-700 my-2.5">
+            <div className="text-[11px] text-slate-400 font-medium mb-1">
+              Inspected Form URL (Deep Link):
+            </div>
+            <div className="font-mono text-xs text-amber-200 break-all select-all">
+              {tabLostAlert.lastKnownUrl}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 mt-3">
+            <button
+              id="btn-reopen-exact-form-autofill"
+              type="button"
+              onClick={handleReopenExactForm}
+              disabled={isReopening}
+              className="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-1.5 rounded-md font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isReopening ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <ExternalLink className="w-3.5 h-3.5" />
+              )}
+              Reopen Exact Form Page
+            </button>
+            <button
+              type="button"
+              onClick={() => setTabLostAlert(null)}
+              className="text-xs text-slate-400 hover:text-white px-2.5 py-1.5 transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       )}
@@ -243,7 +366,7 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
           ) : (
             <ExternalLink className="w-4 h-4" />
           )}
-          Open / Switch to Government Form
+          Go to Live Government Form
         </button>
 
         <div className="flex items-center gap-2">

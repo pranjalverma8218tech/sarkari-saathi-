@@ -11,7 +11,7 @@ import { MobileUploadView } from './components/MobileUploadView.js';
 import { ReviewScreen } from './components/ReviewScreen.js';
 import { StartScreen } from './components/StartScreen.js';
 import { StepIndicator } from './components/StepIndicator.js';
-import { ApplicationSession, FieldMapping, LearningFeedbackEvent } from './types.js';
+import { ApplicationSession, FieldMapping, LearningFeedbackEvent, WorkflowMode } from './types.js';
 import { openGovernmentForm } from './lib/extensionBridge.js';
 
 export default function App() {
@@ -22,6 +22,8 @@ export default function App() {
   const mobileDocName = urlParams.get('doc') || 'Required Document';
   const urlTabId = urlParams.get('tabId');
   const urlWinId = urlParams.get('winId');
+  const urlMode = urlParams.get('mode') as WorkflowMode | null;
+  const urlInspectedUrl = urlParams.get('inspectedUrl') || urlParams.get('url');
 
   if (mobileSession && mobileToken) {
     return (
@@ -36,6 +38,9 @@ export default function App() {
   // Operator State
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [targetUrl, setTargetUrl] = useState<string>('');
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>(
+    urlMode || (urlTabId ? 'EXTENSION_INSPECTION' : 'URL_PASTE')
+  );
   const [targetTabId, setTargetTabId] = useState<number | undefined>(
     urlTabId ? parseInt(urlTabId, 10) : undefined
   );
@@ -64,8 +69,19 @@ export default function App() {
           if (urlWinId && !data.targetWindowId) {
             data.targetWindowId = parseInt(urlWinId, 10);
           }
+          if (urlMode && !data.workflowMode) {
+            data.workflowMode = urlMode;
+          }
+          if (urlInspectedUrl && !data.inspectedUrl) {
+            data.inspectedUrl = urlInspectedUrl;
+          }
+          if (data.workflowMode) {
+            setWorkflowMode(data.workflowMode);
+          } else if (data.targetTabId || urlTabId) {
+            setWorkflowMode('EXTENSION_INSPECTION');
+          }
           setSession(data);
-          setTargetUrl(data.url || '');
+          setTargetUrl(data.inspectedUrl || data.url || '');
           setCurrentStep(data.extractedData && data.extractedData.length > 0 ? 4 : 3);
         })
         .catch((err) => {
@@ -73,7 +89,7 @@ export default function App() {
         })
         .finally(() => setIsLoading(false));
     }
-  }, [mobileSession, mobileToken, urlTabId, urlWinId]);
+  }, [mobileSession, mobileToken, urlTabId, urlWinId, urlMode, urlInspectedUrl]);
 
   // Poll session data when on Documents Screen (Step 3) to detect live uploads
   useEffect(() => {
@@ -134,6 +150,8 @@ export default function App() {
           'X-SmartForm-Origin': window.location.origin,
         },
         body: JSON.stringify({
+          workflowMode: 'URL_PASTE',
+          pastedUrl: resolvedUrl,
           formUrl: resolvedUrl,
           targetTabId: resolvedTabId,
           targetWindowId: resolvedWinId,
@@ -155,6 +173,8 @@ export default function App() {
       // Construct session from response
       const newSession: ApplicationSession = {
         id: data.sessionId,
+        workflowMode: 'URL_PASTE',
+        pastedUrl: resolvedUrl,
         url: resolvedUrl,
         targetTabId: sessionTabId,
         targetWindowId: sessionWinId,
@@ -299,8 +319,21 @@ export default function App() {
             </span>
           </div>
 
-          <div className="text-xs text-slate-500 font-medium">
-            Cyber Café Workstation
+          <div className="flex items-center gap-3">
+            {workflowMode === 'EXTENSION_INSPECTION' ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-full text-xs font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Mode 2: Live Page Extension Assistant
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-800 rounded-full text-xs font-semibold">
+                Mode 1: URL-Paste Form Assistant
+              </span>
+            )}
+
+            <div className="text-xs text-slate-500 font-medium hidden sm:block">
+              Cyber Café Workstation
+            </div>
           </div>
         </div>
       </header>
@@ -346,11 +379,14 @@ export default function App() {
         {currentStep === 4 && session && (
           <AutoFillScreen
             sessionId={session.id}
+            workflowMode={session.workflowMode || workflowMode}
             targetTabId={session.targetTabId}
             targetWindowId={session.targetWindowId}
             mappings={session.mappings}
             verifiedDocTypes={verifiedDocTypes}
-            targetUrl={targetUrl}
+            targetUrl={session.url || targetUrl}
+            pastedUrl={session.pastedUrl}
+            inspectedUrl={session.inspectedUrl}
             onProceedToReview={handleProceedToReview}
           />
         )}
@@ -359,10 +395,12 @@ export default function App() {
         {currentStep === 5 && session && (
           <ReviewScreen
             sessionId={session.id}
+            workflowMode={session.workflowMode || workflowMode}
             targetTabId={session.targetTabId}
             targetWindowId={session.targetWindowId}
             mappings={session.mappings}
             targetUrl={session.url || targetUrl}
+            pastedUrl={session.pastedUrl}
             inspectedUrl={session.inspectedUrl || session.url || targetUrl}
             pageTitle={session.pageTitle}
             onUpdateMapping={handleUpdateMapping}

@@ -117,13 +117,17 @@ export interface FieldMapping {
   editedByOperator?: boolean;
 }
 
+export type WorkflowMode = 'URL_PASTE' | 'EXTENSION_INSPECTION';
+
 export interface ApplicationSession {
   id: string;
+  workflowMode: WorkflowMode;
   url: string;
-  inspectedUrl?: string; // Exact last-known inspected URL (never truncated to domain)
+  pastedUrl?: string; // Mode 1: Exact pasted government form URL
+  inspectedUrl?: string; // Mode 2: Exact last-known inspected URL (never truncated to domain)
   pageTitle?: string;
   formActionUrl?: string;
-  targetTabId?: number;
+  targetTabId?: number; // Primary handle in Chrome
   targetWindowId?: number;
   targetOrigin?: string;
   inspectedAt?: string;

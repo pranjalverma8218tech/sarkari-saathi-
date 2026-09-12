@@ -11,9 +11,11 @@
  */
 
 let activeTabContext = {
+  workflowMode: null, // 'URL_PASTE' | 'EXTENSION_INSPECTION'
   tabId: null,
   windowId: null,
   url: null,
+  pastedUrl: null,
   inspectedUrl: null,
   pageTitle: null,
   formActionUrl: null,
@@ -28,9 +30,11 @@ let activeTabContext = {
 // Restore active context from storage on startup
 chrome.storage.local.get(
   [
+    'workflowMode',
     'activeFormTabId',
     'activeFormWindowId',
     'activeFormUrl',
+    'pastedUrl',
     'inspectedUrl',
     'pageTitle',
     'formActionUrl',
@@ -43,9 +47,11 @@ chrome.storage.local.get(
   (res) => {
     if (res && res.activeFormTabId) {
       activeTabContext = {
+        workflowMode: res.workflowMode || 'EXTENSION_INSPECTION',
         tabId: res.activeFormTabId,
         windowId: res.activeFormWindowId,
         url: res.activeFormUrl,
+        pastedUrl: res.pastedUrl || null,
         inspectedUrl: res.inspectedUrl || res.activeFormUrl,
         pageTitle: res.pageTitle || '',
         formActionUrl: res.formActionUrl || '',
@@ -158,9 +164,11 @@ function handleOpenGovernmentForm(message, sendResponse) {
     if (existingTab) {
       // Re-use existing tab! Never open duplicate tabs or reload.
       updateContextAndStore({
+        workflowMode: 'URL_PASTE',
         tabId: existingTab.id,
         windowId: existingTab.windowId,
         url: existingTab.url,
+        pastedUrl: targetUrl,
         inspectedUrl: existingTab.url,
         origin: getOrigin(existingTab.url),
         targetOrigin: getOrigin(existingTab.url),
@@ -171,9 +179,11 @@ function handleOpenGovernmentForm(message, sendResponse) {
       ensureContentScriptInjected(existingTab.id, () => {
         sendResponse({
           success: true,
+          workflowMode: 'URL_PASTE',
           tabId: existingTab.id,
           windowId: existingTab.windowId,
           url: existingTab.url,
+          pastedUrl: targetUrl,
           reused: true,
           message: 'Existing government portal tab identified and targeted.',
         });
@@ -193,9 +203,11 @@ function handleOpenGovernmentForm(message, sendResponse) {
       }
 
       updateContextAndStore({
+        workflowMode: 'URL_PASTE',
         tabId: newTab.id,
         windowId: newTab.windowId,
         url: targetUrl,
+        pastedUrl: targetUrl,
         inspectedUrl: targetUrl,
         origin: getOrigin(targetUrl),
         targetOrigin: getOrigin(targetUrl),
@@ -213,9 +225,11 @@ function handleOpenGovernmentForm(message, sendResponse) {
 
       sendResponse({
         success: true,
+        workflowMode: 'URL_PASTE',
         tabId: newTab.id,
         windowId: newTab.windowId,
         url: targetUrl,
+        pastedUrl: targetUrl,
         reused: false,
         message: 'Government portal opened in new background tab.',
       });
@@ -227,9 +241,11 @@ function handleRegisterFormTab(message, sendResponse) {
   const exactUrl = (message.inspectedUrl || message.url || '').trim();
   const currentUrl = (message.currentUrl || message.url || exactUrl).trim();
   const origin = message.origin || message.targetOrigin || getOrigin(exactUrl);
+  const workflowMode = message.workflowMode || 'EXTENSION_INSPECTION';
 
   // Runtime Diagnostics: Inspection
   console.log('=== [SmartForm ServiceWorker: REGISTER_FORM_TAB Diagnostics] ===');
+  console.log('workflowMode:', workflowMode);
   console.log('sessionId:', message.sessionId);
   console.log('targetTabId:', message.tabId);
   console.log('targetWindowId:', message.windowId);
@@ -239,9 +255,11 @@ function handleRegisterFormTab(message, sendResponse) {
   console.log('=================================================================');
 
   updateContextAndStore({
+    workflowMode: workflowMode,
     tabId: message.tabId,
     windowId: message.windowId,
     url: exactUrl,
+    pastedUrl: message.pastedUrl || null,
     inspectedUrl: exactUrl,
     currentUrl: currentUrl,
     pageTitle: message.pageTitle || '',
@@ -334,10 +352,11 @@ function handleFocusFormTab(message, sendResponse) {
           focusOperationResult,
           sessionId,
           error: 'ORIGINAL_TAB_NOT_FOUND',
-          message: `Original Government Form Tab Is No Longer Available (Tab #${storedTabId} was closed)`,
+          message: 'Original Government Form Tab Is No Longer Available',
           lastKnownUrl: expectedUrl,
           inspectedUrl: expectedUrl,
           pageTitle: activeTabContext.pageTitle || '',
+          workflowMode: activeTabContext.workflowMode || message.workflowMode,
         });
         return;
       }
@@ -398,6 +417,7 @@ function handleFocusFormTab(message, sendResponse) {
             sessionId,
             error: 'TAB_ACTIVATE_FAILED',
             message: chrome.runtime.lastError.message,
+            workflowMode: activeTabContext.workflowMode || message.workflowMode,
           });
           return;
         }
@@ -431,7 +451,10 @@ function handleFocusFormTab(message, sendResponse) {
             sessionId,
             urlMatches,
             isExactUrl: currentTabUrl === expectedUrl,
-            message: `Live Government Form Connected ✓ Switched to original Chrome tab (#${tab.id})`,
+            message: 'Returned to Live Government Form ✓',
+            returnedMessage: 'Returned to Live Government Form ✓',
+            livePageConnectedMessage: 'Live Government Page Connected ✓',
+            workflowMode: activeTabContext.workflowMode || message.workflowMode,
           });
         };
 
@@ -708,9 +731,11 @@ function updateContextAndStore(newCtx) {
   activeTabContext.targetOrigin = effectiveOrigin;
 
   chrome.storage.local.set({
+    workflowMode: activeTabContext.workflowMode,
     activeFormTabId: activeTabContext.tabId,
     activeFormWindowId: activeTabContext.windowId,
     activeFormUrl: activeTabContext.url,
+    pastedUrl: activeTabContext.pastedUrl,
     inspectedUrl: activeTabContext.inspectedUrl,
     pageTitle: activeTabContext.pageTitle || '',
     formActionUrl: activeTabContext.formActionUrl || '',

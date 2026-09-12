@@ -484,7 +484,9 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
     try {
       const {
         formUrl,
+        pastedUrl,
         inspectedUrl,
+        workflowMode,
         pageTitle,
         formActionUrl,
         detectedFields = [],
@@ -494,11 +496,17 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         timestamp,
       } = req.body;
 
-      if (!formUrl) {
+      if (!formUrl && !pastedUrl && !inspectedUrl) {
         return res.status(400).json({ error: 'Government form URL is required.' });
       }
 
-      const exactInspectedUrl = (inspectedUrl || formUrl || '').trim();
+      const activeUrl = (formUrl || pastedUrl || inspectedUrl || '').trim();
+      const resolvedMode = (workflowMode === 'EXTENSION_INSPECTION' || (!workflowMode && typeof targetTabId === 'number' && inspectedUrl))
+        ? 'EXTENSION_INSPECTION'
+        : 'URL_PASTE';
+
+      const resolvedPastedUrl = resolvedMode === 'URL_PASTE' ? (pastedUrl || activeUrl) : undefined;
+      const exactInspectedUrl = resolvedMode === 'EXTENSION_INSPECTION' ? (inspectedUrl || activeUrl) : (inspectedUrl || undefined);
 
       // If detectedFields was not provided by the extension, extract standard fields
       // or inspect live-test-form if it's the test URL
@@ -606,7 +614,9 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
 
         const synchronizedSession: ApplicationSession = {
           id: remoteAnalysisResult.sessionId,
-          url: formUrl,
+          workflowMode: resolvedMode,
+          url: activeUrl,
+          pastedUrl: resolvedPastedUrl,
           inspectedUrl: exactInspectedUrl,
           pageTitle: pageTitle || '',
           formActionUrl: formActionUrl || '',
@@ -614,7 +624,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
           inspectionState: 'active_inspected',
           targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
           targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
-          targetOrigin: targetOrigin || (formUrl ? new URL(formUrl).origin : undefined),
+          targetOrigin: targetOrigin || (activeUrl ? new URL(activeUrl).origin : undefined),
           status: 'waiting_documents',
           detectedFields: fieldsToAnalyze,
           requirements: remoteAnalysisResult.requirements || [],
@@ -633,6 +643,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
 
         return res.json({
           sessionId: remoteAnalysisResult.sessionId,
+          workflowMode: synchronizedSession.workflowMode,
           formTitle: remoteAnalysisResult.formTitle,
           summary: remoteAnalysisResult.summary,
           documentRequirements: remoteAnalysisResult.documentRequirements,
@@ -642,6 +653,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
           targetWindowId: synchronizedSession.targetWindowId,
           targetOrigin: synchronizedSession.targetOrigin,
           targetUrl: synchronizedSession.url,
+          pastedUrl: synchronizedSession.pastedUrl,
           inspectedUrl: synchronizedSession.inspectedUrl,
           pageTitle: synchronizedSession.pageTitle,
           formActionUrl: synchronizedSession.formActionUrl,
@@ -732,7 +744,9 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
 
       const session: ApplicationSession = {
         id: sessionId,
-        url: formUrl,
+        workflowMode: resolvedMode,
+        url: activeUrl,
+        pastedUrl: resolvedPastedUrl,
         inspectedUrl: exactInspectedUrl,
         pageTitle: pageTitle || '',
         formActionUrl: formActionUrl || '',
@@ -740,7 +754,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         inspectionState: 'active_inspected',
         targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
         targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
-        targetOrigin: targetOrigin || (formUrl ? new URL(formUrl).origin : undefined),
+        targetOrigin: targetOrigin || (activeUrl ? new URL(activeUrl).origin : undefined),
         status: 'waiting_documents',
         detectedFields: fieldsToAnalyze,
         requirements: analysis.fieldRequirements,
@@ -759,6 +773,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
 
       res.json({
         sessionId,
+        workflowMode: session.workflowMode,
         formTitle: analysis.formTitle,
         summary: analysis.summary,
         documentRequirements: docRequirements,
@@ -768,6 +783,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         targetWindowId: session.targetWindowId,
         targetOrigin: session.targetOrigin,
         targetUrl: session.url,
+        pastedUrl: session.pastedUrl,
         inspectedUrl: session.inspectedUrl,
         pageTitle: session.pageTitle,
         formActionUrl: session.formActionUrl,
@@ -790,8 +806,10 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         targetTabId,
         targetWindowId,
         targetUrl,
+        pastedUrl,
         targetOrigin,
         inspectedUrl,
+        workflowMode,
         pageTitle,
         formActionUrl,
         inspectedAt,
@@ -803,9 +821,11 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         return res.status(404).json({ error: 'Application session not found.' });
       }
 
+      if (workflowMode === 'URL_PASTE' || workflowMode === 'EXTENSION_INSPECTION') session.workflowMode = workflowMode;
       if (typeof targetTabId === 'number') session.targetTabId = targetTabId;
       if (typeof targetWindowId === 'number') session.targetWindowId = targetWindowId;
       if (targetUrl && typeof targetUrl === 'string') session.url = targetUrl;
+      if (pastedUrl && typeof pastedUrl === 'string') session.pastedUrl = pastedUrl;
       if (targetOrigin && typeof targetOrigin === 'string') session.targetOrigin = targetOrigin;
       if (inspectedUrl && typeof inspectedUrl === 'string') session.inspectedUrl = inspectedUrl;
       if (pageTitle && typeof pageTitle === 'string') session.pageTitle = pageTitle;
@@ -818,9 +838,11 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
       res.json({
         success: true,
         sessionId: session.id,
+        workflowMode: session.workflowMode,
         targetTabId: session.targetTabId,
         targetWindowId: session.targetWindowId,
         targetUrl: session.url,
+        pastedUrl: session.pastedUrl,
         targetOrigin: session.targetOrigin,
         inspectedUrl: session.inspectedUrl,
         pageTitle: session.pageTitle,
@@ -846,9 +868,11 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
       res.json({
         success: true,
         sessionId: session.id,
+        workflowMode: session.workflowMode,
         targetTabId: session.targetTabId,
         targetWindowId: session.targetWindowId,
         targetUrl: session.url,
+        pastedUrl: session.pastedUrl,
         targetOrigin: session.targetOrigin,
         inspectedUrl: session.inspectedUrl,
         pageTitle: session.pageTitle,

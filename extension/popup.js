@@ -140,17 +140,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentStoredSessionId = null;
   let storedTargetTabId = null;
   let storedTargetWindowId = null;
+  let storedLastUrl = null;
+  let storedWorkflowMode = null;
 
   function loadActiveSession() {
     if (!chrome.storage || !chrome.storage.local) return;
 
     chrome.storage.local.get(
-      ['activeSessionId', 'activeFormTabId', 'activeFormWindowId', 'activeFormUrl'],
+      ['activeSessionId', 'activeFormTabId', 'activeFormWindowId', 'activeFormUrl', 'inspectedUrl', 'workflowMode'],
       (res) => {
         if (res && res.activeSessionId) {
           currentStoredSessionId = res.activeSessionId;
           storedTargetTabId = res.activeFormTabId;
           storedTargetWindowId = res.activeFormWindowId;
+          storedLastUrl = res.inspectedUrl || res.activeFormUrl || null;
+          storedWorkflowMode = res.workflowMode || 'EXTENSION_INSPECTION';
 
           sessionBox.classList.remove('hidden');
           activeSessionDisplay.innerText = `Session: ${res.activeSessionId}`;
@@ -379,6 +383,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               'X-SmartForm-Origin': serverUrl,
             },
             body: JSON.stringify({
+              workflowMode: 'EXTENSION_INSPECTION',
               formUrl: exactCurrentUrl,
               inspectedUrl: exactCurrentUrl,
               pageTitle: exactPageTitle,
@@ -399,6 +404,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // Log inspection runtime diagnostics as required
             console.log('=== [SmartForm Extension: Inspection Runtime Diagnostics] ===');
+            console.log('workflowMode: EXTENSION_INSPECTION');
             console.log('sessionId:', data.sessionId);
             console.log('targetTabId:', activeTab.id);
             console.log('targetWindowId:', activeTab.windowId);
@@ -429,6 +435,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Register active government form tab in background service worker
             chrome.runtime.sendMessage({
               action: 'REGISTER_FORM_TAB',
+              workflowMode: 'EXTENSION_INSPECTION',
               tabId: activeTab.id,
               windowId: activeTab.windowId,
               url: exactCurrentUrl,
@@ -447,6 +454,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Save active session in chrome.storage.local
             if (chrome.storage && chrome.storage.local) {
               chrome.storage.local.set({
+                workflowMode: 'EXTENSION_INSPECTION',
                 activeSessionId: data.sessionId,
                 activeFormTabId: activeTab.id,
                 activeFormWindowId: activeTab.windowId,
@@ -463,7 +471,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             // Open operator dashboard using the configured server URL with all parameters
-            const dashboardUrl = `${serverUrl}/?session=${data.sessionId}&url=${encodeURIComponent(exactCurrentUrl)}&inspectedUrl=${encodeURIComponent(exactCurrentUrl)}&tabId=${activeTab.id}&winId=${activeTab.windowId}&title=${encodeURIComponent(exactPageTitle)}`;
+            const dashboardUrl = `${serverUrl}/?session=${data.sessionId}&mode=EXTENSION_INSPECTION&url=${encodeURIComponent(exactCurrentUrl)}&inspectedUrl=${encodeURIComponent(exactCurrentUrl)}&tabId=${activeTab.id}&winId=${activeTab.windowId}&title=${encodeURIComponent(exactPageTitle)}`;
             chrome.tabs.create({ url: dashboardUrl });
 
             inspectBtn.innerText = 'Form Sent! Opening Dashboard...';
