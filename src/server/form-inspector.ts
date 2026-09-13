@@ -70,6 +70,23 @@ export async function inspectTargetPage(
         required: true,
       },
       {
+        fieldType: 'text',
+        label: 'Subjects',
+        name: 'subjects',
+        id: 'subjectsInput',
+        selector: '#subjectsInput',
+        required: false,
+      },
+      {
+        fieldType: 'checkbox',
+        label: 'Hobbies',
+        name: 'hobbies',
+        id: 'hobbies-checkbox-1',
+        selector: '#hobbiesWrapper input[type="checkbox"]',
+        required: false,
+        options: ['Sports', 'Reading', 'Music'],
+      },
+      {
         fieldType: 'textarea',
         label: 'Current Address',
         name: 'currentAddress',

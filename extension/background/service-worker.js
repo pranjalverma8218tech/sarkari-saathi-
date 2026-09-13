@@ -221,24 +221,53 @@ function handleOpenGovernmentForm(message, sendResponse) {
       });
 
       // Wait for tab to load and inject content script
+      let responded = false;
       const onUpdatedListener = (tabId, info) => {
         if (tabId === newTab.id && info.status === 'complete') {
           chrome.tabs.onUpdated.removeListener(onUpdatedListener);
-          ensureContentScriptInjected(newTab.id, () => {});
+          ensureContentScriptInjected(newTab.id, () => {
+            pollForLiveFields(newTab.id, 8, 350, (fields) => {
+              if (responded) return;
+              responded = true;
+              sendResponse({
+                success: true,
+                workflowMode: 'URL_PASTE',
+                tabId: newTab.id,
+                windowId: newTab.windowId,
+                url: targetUrl,
+                pastedUrl: targetUrl,
+                fields: fields || [],
+                reused: false,
+                message: 'Government portal opened and live DOM inspected.',
+              });
+            });
+          });
         }
       };
       chrome.tabs.onUpdated.addListener(onUpdatedListener);
 
-      sendResponse({
-        success: true,
-        workflowMode: 'URL_PASTE',
-        tabId: newTab.id,
-        windowId: newTab.windowId,
-        url: targetUrl,
-        pastedUrl: targetUrl,
-        reused: false,
-        message: 'Government portal opened in new background tab.',
-      });
+      // Fallback timeout in case onUpdated complete took too long
+      setTimeout(() => {
+        if (!responded) {
+          responded = true;
+          chrome.tabs.onUpdated.removeListener(onUpdatedListener);
+          ensureContentScriptInjected(newTab.id, () => {
+            pollForLiveFields(newTab.id, 4, 300, (fields) => {
+              sendResponse({
+                success: true,
+                workflowMode: 'URL_PASTE',
+                tabId: newTab.id,
+                windowId: newTab.windowId,
+                url: targetUrl,
+                pastedUrl: targetUrl,
+                fields: fields || [],
+                reused: false,
+                message: 'Government portal opened in new background tab.',
+              });
+            });
+          });
+        }
+      }, 5000);
     });
   });
 }
@@ -583,6 +612,25 @@ function handleGetFormStatus(message, sendResponse) {
   });
 }
 
+function pollForLiveFields(tabId, maxRetries, intervalMs, callback) {
+  let attempts = 0;
+  function attempt() {
+    attempts++;
+    chrome.tabs.sendMessage(tabId, { action: 'SMARTFORM_INSPECT_DOM' }, (resp) => {
+      if (!chrome.runtime.lastError && resp && resp.data && Array.isArray(resp.data.fields) && resp.data.fields.length > 0) {
+        callback(resp.data.fields, resp.data);
+        return;
+      }
+      if (attempts < maxRetries) {
+        setTimeout(attempt, intervalMs);
+      } else {
+        callback(resp?.data?.fields || [], resp?.data || {});
+      }
+    });
+  }
+  attempt();
+}
+
 /**
  * Handles INSPECT_FORM_TAB to extract live DOM fields from an open government form tab.
  */
@@ -594,22 +642,13 @@ function handleInspectFormTab(message, sendResponse) {
   }
 
   ensureContentScriptInjected(tabId, () => {
-    chrome.tabs.sendMessage(tabId, { action: 'SMARTFORM_INSPECT_DOM' }, (resp) => {
-      if (chrome.runtime.lastError || !resp || !resp.data) {
-        sendResponse({
-          success: false,
-          tabId,
-          error: chrome.runtime.lastError ? chrome.runtime.lastError.message : 'INSPECT_FAILED',
-          fields: [],
-        });
-        return;
-      }
+    pollForLiveFields(tabId, 8, 300, (fields, meta) => {
       sendResponse({
         success: true,
         tabId,
-        url: resp.data.url,
-        title: resp.data.title,
-        fields: resp.data.fields || [],
+        url: meta?.url || message.url,
+        title: meta?.title || '',
+        fields: fields || [],
       });
     });
   });

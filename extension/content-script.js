@@ -6,20 +6,87 @@
 
 // Helper to determine element label
 function getFieldLabel(el) {
-  // 1. Explicit <label for="id">
+  const type = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
+
+  // 1. Differentiate First Name / Last Name or specific placeholders for text inputs
+  if (el.placeholder && el.placeholder.trim() && !['radio', 'checkbox'].includes(type)) {
+    const ph = el.placeholder.trim();
+    const phLower = ph.toLowerCase();
+    if (
+      phLower.includes('first') ||
+      phLower.includes('last') ||
+      phLower.includes('middle') ||
+      phLower.includes('mobile') ||
+      phLower.includes('email') ||
+      phLower.includes('address')
+    ) {
+      return ph;
+    }
+  }
+
+  // 2. Radio & Checkbox group context (e.g. Gender, Hobbies, Status)
+  if (['radio', 'checkbox'].includes(type)) {
+    const rowOrGroup = el.closest(
+      '.row, [id$="-wrapper"], [id$="Wrapper"], .form-group, .form-row, fieldset, [class*="group"]'
+    );
+    if (rowOrGroup) {
+      let gText = '';
+      const firstCol = rowOrGroup.querySelector('div[class*="col"]:first-child, [class*="title"], [class*="header"]');
+      if (firstCol && !firstCol.querySelector('input, select, textarea') && firstCol.innerText.trim().length > 0 && firstCol.innerText.trim().length < 50) {
+        gText = firstCol.innerText.trim();
+      } else {
+        const groupLabel = rowOrGroup.querySelector(
+          'label[id$="-label"]:not([class*="form-check"]), label:not([for]):not([class*="form-check"]), legend, .col-form-label'
+        );
+        if (groupLabel && groupLabel.innerText && groupLabel.innerText.trim()) {
+          gText = groupLabel.innerText.trim();
+        }
+      }
+
+      let optText = '';
+      if (el.id) {
+        const optLabel = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (optLabel && optLabel.innerText.trim()) optText = optLabel.innerText.trim();
+      }
+      if (!optText) {
+        const pLabel = el.closest('label');
+        if (pLabel && pLabel.innerText.trim()) optText = pLabel.innerText.trim();
+      }
+
+      if (gText && optText) return `${gText} (${optText})`;
+      if (gText) return gText;
+      if (optText) return optText;
+    }
+  }
+
+  // 3. Explicit <label for="id">
   if (el.id) {
     const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     if (label && label.innerText.trim()) return label.innerText.trim();
   }
 
-  // 2. Enclosing <label>
+  // 4. Enclosing <label>
   const parentLabel = el.closest('label');
   if (parentLabel && parentLabel.innerText.trim()) {
-    // Clone and remove input text if needed
     return parentLabel.innerText.replace(el.value || '', '').trim();
   }
 
-  // 3. aria-label or aria-labelledby
+  // 5. Row / Group Wrapper context (Bootstrap .row, DemoQA #...-wrapper, .form-group)
+  const rowOrGroup = el.closest(
+    '.row, [id$="-wrapper"], [id$="Wrapper"], .form-group, .form-row, fieldset, [class*="group"]'
+  );
+  if (rowOrGroup) {
+    const groupLabel = rowOrGroup.querySelector('label[id$="-label"], label:not([for]), .form-label, .col-form-label, legend, [class*="label"]');
+    if (groupLabel && groupLabel.innerText && groupLabel.innerText.trim()) {
+      return groupLabel.innerText.trim();
+    }
+    const firstCol = rowOrGroup.querySelector('div[class*="col"]:first-child');
+    if (firstCol && firstCol.innerText && firstCol.innerText.trim().length > 0 && firstCol.innerText.trim().length < 50) {
+      return firstCol.innerText.trim();
+    }
+  }
+
+  // 4. aria-label or aria-labelledby
   if (el.getAttribute('aria-label')) {
     return el.getAttribute('aria-label').trim();
   }
@@ -28,18 +95,18 @@ function getFieldLabel(el) {
     if (ref && ref.innerText.trim()) return ref.innerText.trim();
   }
 
-  // 4. Placeholder
+  // 5. Placeholder
   if (el.placeholder && el.placeholder.trim()) {
     return el.placeholder.trim();
   }
 
-  // 5. Table context (e.g. <tr><td>Label</td><td><input></td></tr>)
+  // 6. Table context (e.g. <tr><td>Label</td><td><input></td></tr>)
   const td = el.closest('td');
   if (td && td.previousElementSibling && td.previousElementSibling.innerText.trim()) {
     return td.previousElementSibling.innerText.trim();
   }
 
-  // 6. Fieldset legend or preceding sibling text
+  // 7. Fieldset legend or preceding sibling text
   const fieldset = el.closest('fieldset');
   if (fieldset) {
     const legend = fieldset.querySelector('legend');
@@ -48,7 +115,7 @@ function getFieldLabel(el) {
     }
   }
 
-  // 7. Nearby text
+  // 8. Nearby text
   let prev = el.previousElementSibling;
   while (prev) {
     if (prev.innerText && prev.innerText.trim().length > 0 && prev.innerText.trim().length < 60) {
@@ -57,7 +124,7 @@ function getFieldLabel(el) {
     prev = prev.previousElementSibling;
   }
 
-  // 8. Fallback to name or id
+  // 9. Fallback to name or id
   return el.name || el.id || 'Unnamed Field';
 }
 
@@ -136,7 +203,7 @@ function inspectLiveForm() {
 }
 
 // Set value safely supporting React/Vue/Angular controlled inputs
-function setNativeValue(element, value) {
+function setNativeValue(element, value, shouldBlur = true) {
   if (!element) return false;
   const tagName = element.tagName.toLowerCase();
   const isInput = tagName === 'input';
@@ -166,7 +233,9 @@ function setNativeValue(element, value) {
     // Trigger full synthetic event sequence for frameworks (React, Angular, Vue, Alpine, Svelte)
     element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-    element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+    if (shouldBlur) {
+      element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+    }
 
     // Verify the resulting value
     let verified = element.value === String(value);
@@ -175,6 +244,9 @@ function setNativeValue(element, value) {
         element.value = value;
         element.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: String(value) }));
         element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        if (shouldBlur) {
+          element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+        }
         verified = element.value === String(value);
       } catch (e) {}
     }
@@ -266,30 +338,43 @@ function fillSplitDateFields(allInputs, rawDateStr) {
 }
 
 // Helper to normalize and format dates for different input types
-function normalizeDateValue(value, inputType) {
+function normalizeDateValue(value, inputType, targetElement) {
   if (!value || typeof value !== 'string') return value;
   const clean = value.trim();
 
+  let day = '', month = '', year = '';
   // Match DD/MM/YYYY or DD-MM-YYYY
   const dmyMatch = clean.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (dmyMatch) {
-    const day = dmyMatch[1].padStart(2, '0');
-    const month = dmyMatch[2].padStart(2, '0');
-    const year = dmyMatch[3];
+    day = dmyMatch[1].padStart(2, '0');
+    month = dmyMatch[2].padStart(2, '0');
+    year = dmyMatch[3];
+  } else {
+    // Match YYYY-MM-DD
+    const ymdMatch = clean.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+    if (ymdMatch) {
+      year = ymdMatch[1];
+      month = ymdMatch[2].padStart(2, '0');
+      day = ymdMatch[3].padStart(2, '0');
+    }
+  }
+
+  if (day && month && year) {
     if (inputType === 'date') {
       return `${year}-${month}-${day}`; // ISO format for <input type="date">
     }
-    return `${day}/${month}/${year}`;
-  }
-
-  // Match YYYY-MM-DD
-  const ymdMatch = clean.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
-  if (ymdMatch) {
-    const year = ymdMatch[1];
-    const month = ymdMatch[2].padStart(2, '0');
-    const day = ymdMatch[3].padStart(2, '0');
-    if (inputType === 'date') {
-      return `${year}-${month}-${day}`;
+    // Check if target is a React DatePicker or DemoQA dateOfBirthInput expecting "DD MMM YYYY"
+    const isDatePicker = targetElement && (
+      targetElement.id === 'dateOfBirthInput' ||
+      targetElement.closest('.react-datepicker__input-container') ||
+      targetElement.getAttribute('dateFormat') ||
+      (targetElement.className && targetElement.className.includes('datepicker'))
+    );
+    if (isDatePicker) {
+      const monthShortNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mIdx = parseInt(month, 10) - 1;
+      const mName = monthShortNames[mIdx] || month;
+      return `${day} ${mName} ${year}`;
     }
     return `${day}/${month}/${year}`;
   }
@@ -297,8 +382,72 @@ function normalizeDateValue(value, inputType) {
   return clean;
 }
 
+// Robust React-Select compatible autofill for multi-value fields
+async function fillReactSelectMultiValue(inputEl, valStr) {
+  if (!inputEl) return false;
+  const subjects = String(valStr).split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean);
+  if (subjects.length === 0) subjects.push(String(valStr).trim());
+
+  let anyCommitted = false;
+
+  for (const subj of subjects) {
+    if (!subj) continue;
+
+    // 1. Focus #subjectsInput
+    try {
+      inputEl.focus();
+    } catch (e) {}
+
+    // 2. Set the native input value using the existing framework-safe setter without blurring
+    setNativeValue(inputEl, subj, false);
+
+    // Small delay for React-Select to process input and display options
+    await new Promise((r) => setTimeout(r, 80));
+
+    // 3. Trigger the React-Select option selection/commit using realistic keyboard events (keydown/keyup), especially Enter
+    const keyOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, composed: true, cancelable: true };
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
+    inputEl.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
+    inputEl.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
+
+    // 4. Wait for the selected-value/chip to appear in the DOM
+    let chipAppeared = false;
+    for (let i = 0; i < 20; i++) {
+      const chip = document.querySelector('.subjects-auto-complete__multi-value, [class*="multi-value"]');
+      if (chip) {
+        chipAppeared = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    // 5. Only then blur/tab away
+    inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', keyCode: 9, which: 9, bubbles: true, composed: true }));
+    try {
+      inputEl.blur();
+    } catch (e) {}
+    inputEl.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+
+    // 6. Verify that the selected subject/chip remains present after blur
+    await new Promise((r) => setTimeout(r, 50));
+    const chipAfter = document.querySelector('.subjects-auto-complete__multi-value, [class*="multi-value"]');
+    if (chipAfter || chipAppeared) {
+      anyCommitted = true;
+    }
+  }
+
+  // Visual feedback
+  const wrapper = inputEl.closest('#subjectsWrapper, #subjectsContainer, [class*="container"]') || inputEl.parentElement;
+  if (wrapper) {
+    wrapper.style.backgroundColor = '#ecfdf5';
+    wrapper.style.borderColor = '#10b981';
+  }
+
+  return anyCommitted;
+}
+
 // Execute auto-fill from SmartForm AI payload
-function executeAutoFill(mappings) {
+async function executeAutoFill(mappings) {
   const fillResults = {
     filledCount: 0,
     filledFields: [],
@@ -315,9 +464,13 @@ function executeAutoFill(mappings) {
       continue;
     }
 
+    const valStr = String(mapping.extractedValue).trim();
+    const valLower = valStr.toLowerCase();
+    const targetLabelLower = (mapping.targetField || '').toLowerCase().trim();
+
     let el = null;
 
-    // 1. Selector match
+    // 1. Target Selector match
     if (mapping.targetSelector) {
       try {
         el = document.querySelector(mapping.targetSelector);
@@ -334,38 +487,187 @@ function executeAutoFill(mappings) {
       el = document.querySelector(`[name="${CSS.escape(mapping.targetName)}"]`);
     }
 
-    // 4. Semantic field label / placeholder / aria-label matching
-    if (!el) {
-      const searchTarget = (mapping.targetField || '').toLowerCase().trim();
-      const keyWords = searchTarget.split(/\s+/).filter((w) => w.length > 2);
+    // Special handler: Candidate Name / Full Name when page has split first and last name fields
+    const isFullNameField =
+      (targetLabelLower.includes('name') && !targetLabelLower.includes('father') && !targetLabelLower.includes('mother') && !targetLabelLower.includes('board')) &&
+      !targetLabelLower.includes('first') &&
+      !targetLabelLower.includes('last');
+    if (isFullNameField) {
+      const fnEl = document.querySelector('#firstName, input[name="firstName"], input[name="first_name"]');
+      const lnEl = document.querySelector('#lastName, input[name="lastName"], input[name="last_name"]');
+      if (fnEl && lnEl && (!el || el.id === 'firstName' || el.id === 'lastName')) {
+        const parts = valStr.split(/\s+/);
+        if (parts.length >= 2) {
+          setNativeValue(fnEl, parts[0]);
+          setNativeValue(lnEl, parts.slice(1).join(' '));
+          fillResults.filledCount += 2;
+          fillResults.filledFields.push('First Name', 'Last Name');
+          continue;
+        }
+      }
+    }
 
-      // Search all form inputs
+    // Special handler: First Name or Last Name specifically
+    if (targetLabelLower.includes('first') && targetLabelLower.includes('name')) {
+      const fnEl = document.querySelector('#firstName, input[name="firstName"], input[name="first_name"]');
+      if (fnEl) el = fnEl;
+    } else if (targetLabelLower.includes('last') && targetLabelLower.includes('name')) {
+      const lnEl = document.querySelector('#lastName, input[name="lastName"], input[name="last_name"]');
+      if (lnEl) el = lnEl;
+    }
+
+    // Special handler: Date of Birth (#dateOfBirthInput)
+    if (targetLabelLower.includes('birth') || targetLabelLower.includes('dob')) {
+      const dobEl = document.querySelector('#dateOfBirthInput, input[name="dateOfBirthInput"], input[name="dob"]');
+      if (dobEl) el = dobEl;
+    }
+
+    // Special handler: Subjects (#subjectsInput inside React-Select)
+    if (targetLabelLower.includes('subject')) {
+      const subEl = document.querySelector('#subjectsInput, #subjectsContainer input, input[name="subjects"]');
+      if (subEl) el = subEl;
+    }
+
+    // Special handler: Mobile (#userNumber)
+    if (targetLabelLower.includes('mobile') || targetLabelLower.includes('phone') || targetLabelLower.includes('contact')) {
+      const mobEl = document.querySelector('#userNumber, input[name="userNumber"], input[type="tel"]');
+      if (mobEl) el = mobEl;
+    }
+
+    // Special handler: Email (#userEmail)
+    if (targetLabelLower.includes('email')) {
+      const emEl = document.querySelector('#userEmail, input[name="userEmail"], input[type="email"]');
+      if (emEl) el = emEl;
+    }
+
+    // Special handler: Address (#currentAddress)
+    if (targetLabelLower.includes('address')) {
+      const addrEl = document.querySelector('#currentAddress, textarea[name="currentAddress"], textarea[id*="address"]');
+      if (addrEl) el = addrEl;
+    }
+
+    // Special handler: Gender (Radio Group)
+    if (targetLabelLower.includes('gender')) {
+      const genderRadios = Array.from(document.querySelectorAll('input[type="radio"][name="gender"], #genterWrapper input[type="radio"], [id*="gender"] input[type="radio"]'));
+      if (genderRadios.length > 0) {
+        let matchedRadio = null;
+        for (const gr of genderRadios) {
+          const rVal = (gr.value || '').toLowerCase();
+          const rLabel = (getFieldLabel(gr) || '').toLowerCase();
+          const optLabel = gr.id ? (document.querySelector(`label[for="${CSS.escape(gr.id)}"]`)?.innerText || '').toLowerCase() : '';
+          if (
+            rVal === valLower ||
+            optLabel === valLower ||
+            (valLower.startsWith('m') && (rVal.startsWith('m') || optLabel.startsWith('m'))) ||
+            (valLower.startsWith('f') && (rVal.startsWith('f') || optLabel.startsWith('f'))) ||
+            (valLower.startsWith('o') && (rVal.startsWith('o') || optLabel.startsWith('o')))
+          ) {
+            matchedRadio = gr;
+            break;
+          }
+        }
+        if (!matchedRadio) matchedRadio = genderRadios[0];
+
+        if (matchedRadio) {
+          const proto = window.HTMLInputElement.prototype;
+          const checkedDesc = Object.getOwnPropertyDescriptor(proto, 'checked');
+          if (matchedRadio._valueTracker) matchedRadio._valueTracker.setValue(!matchedRadio.checked);
+          if (checkedDesc && checkedDesc.set) checkedDesc.set.call(matchedRadio, true);
+          else matchedRadio.checked = true;
+
+          const labelFor = matchedRadio.id ? document.querySelector(`label[for="${CSS.escape(matchedRadio.id)}"]`) : null;
+          const parentLabel = matchedRadio.closest('label');
+          const clickEl = labelFor || parentLabel || matchedRadio;
+
+          try { matchedRadio.focus(); } catch (e) {}
+          try { clickEl.click(); } catch (e) {}
+
+          matchedRadio.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+          matchedRadio.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          matchedRadio.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+
+          fillResults.filledCount++;
+          fillResults.filledFields.push(mapping.targetField);
+          continue;
+        }
+      }
+    }
+
+    // Special handler: Hobbies (Checkboxes)
+    if (targetLabelLower.includes('hobbi') || targetLabelLower.includes('hobby')) {
+      const hobbyCheckboxes = Array.from(document.querySelectorAll('#hobbiesWrapper input[type="checkbox"], input[type="checkbox"][id*="hobbies"]'));
+      if (hobbyCheckboxes.length > 0) {
+        let hobbyFilled = false;
+        for (const cb of hobbyCheckboxes) {
+          const optLabel = cb.id ? (document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)?.innerText || '').toLowerCase().trim() : '';
+          const cbVal = (cb.value || '').toLowerCase().trim();
+          const shouldCheck =
+            valLower.includes('all') ||
+            (optLabel && valLower.includes(optLabel)) ||
+            (cbVal && valLower.includes(cbVal)) ||
+            (valLower.includes('sport') && optLabel.includes('sport')) ||
+            (valLower.includes('read') && optLabel.includes('read')) ||
+            (valLower.includes('music') && optLabel.includes('music'));
+
+          if (shouldCheck) {
+            if (!cb.checked) {
+              const labelFor = cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null;
+              const parentLabel = cb.closest('label');
+              const clickEl = labelFor || parentLabel || cb;
+
+              try { cb.focus(); } catch (e) {}
+              try { clickEl.click(); } catch (e) {}
+
+              if (!cb.checked) {
+                const proto = window.HTMLInputElement.prototype;
+                const checkedDesc = Object.getOwnPropertyDescriptor(proto, 'checked');
+                if (cb._valueTracker) cb._valueTracker.setValue(false);
+                if (checkedDesc && checkedDesc.set) checkedDesc.set.call(cb, true);
+                else cb.checked = true;
+
+                cb.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                cb.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+              }
+            }
+
+            try { cb.dispatchEvent(new Event('blur', { bubbles: true, composed: true })); } catch (e) {}
+            hobbyFilled = true;
+          }
+        }
+        if (hobbyFilled) {
+          fillResults.filledCount++;
+          fillResults.filledFields.push(mapping.targetField);
+          continue;
+        }
+      }
+    }
+
+    // 4. Semantic fallback search all form inputs
+    if (!el) {
       el = allInputs.find((candidate) => {
         const type = (candidate.getAttribute('type') || '').toLowerCase();
         if (['hidden', 'submit', 'button', 'reset'].includes(type)) return false;
 
         const label = getFieldLabel(candidate).toLowerCase();
         const placeholder = (candidate.placeholder || '').toLowerCase();
-        const ariaLabel = (candidate.getAttribute('aria-label') || '').toLowerCase();
         const name = (candidate.name || '').toLowerCase();
         const id = (candidate.id || '').toLowerCase();
 
-        // Exact match
-        if (label === searchTarget || name === searchTarget || id === searchTarget) return true;
-        // Contains match
-        if (label.includes(searchTarget) || searchTarget.includes(label)) return true;
-        // Keywords match
-        if (keyWords.length >= 2 && keyWords.every((kw) => label.includes(kw) || name.includes(kw) || placeholder.includes(kw))) {
-          return true;
-        }
-        return false;
+        return (
+          label === targetLabelLower ||
+          name === targetLabelLower ||
+          id === targetLabelLower ||
+          label.includes(targetLabelLower) ||
+          targetLabelLower.includes(label) ||
+          (placeholder && placeholder.includes(targetLabelLower))
+        );
       });
     }
 
     if (el) {
       const type = (el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
 
-      // Check for file input - DO NOT bypass security, show manual requirement banner
+      // Check for file input
       if (type === 'file') {
         fillResults.manualFileAttachments.push({
           field: mapping.targetField,
@@ -374,7 +676,25 @@ function executeAutoFill(mappings) {
         });
         el.style.outline = '3px solid #f59e0b';
         el.style.backgroundColor = '#fffbeb';
-        el.setAttribute('title', `SmartForm AI: Manual document attachment required for ${mapping.source}`);
+        continue;
+      }
+
+      // Check for React-Select subjects input
+      if (el.id === 'subjectsInput' || el.closest('#subjectsContainer') || targetLabelLower.includes('subject')) {
+        await fillReactSelectMultiValue(el, valStr);
+        fillResults.filledCount++;
+        fillResults.filledFields.push(mapping.targetField);
+        continue;
+      }
+
+      // Check for date input (react-datepicker or HTML date)
+      if (el.id === 'dateOfBirthInput' || type === 'date' || el.closest('.react-datepicker__input-container')) {
+        const normalizedDate = normalizeDateValue(valStr, type, el);
+        setNativeValue(el, normalizedDate);
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, composed: true }));
+        el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, composed: true }));
+        fillResults.filledCount++;
+        fillResults.filledFields.push(mapping.targetField);
         continue;
       }
 
@@ -382,19 +702,30 @@ function executeAutoFill(mappings) {
       if (type === 'radio') {
         const name = el.name;
         const radios = Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`));
-        const valLower = mapping.extractedValue.toLowerCase().trim();
         let radioMatched = false;
         for (const radio of radios) {
           const radioLabel = getFieldLabel(radio).toLowerCase().trim();
           const radioVal = (radio.value || '').toLowerCase().trim();
-          if (radioVal === valLower || radioLabel === valLower || radioLabel.includes(valLower) || valLower.includes(radioVal)) {
-            radio.checked = true;
-            try { radio.focus(); } catch (e) {}
-            // Also click associated label if present (common for custom-styled react radio buttons)
+          const optLabel = radio.id ? (document.querySelector(`label[for="${CSS.escape(radio.id)}"]`)?.innerText || '').toLowerCase() : '';
+          if (
+            radioVal === valLower ||
+            optLabel === valLower ||
+            radioLabel === valLower ||
+            radioLabel.includes(valLower) ||
+            valLower.includes(radioVal)
+          ) {
+            const proto = window.HTMLInputElement.prototype;
+            const checkedDesc = Object.getOwnPropertyDescriptor(proto, 'checked');
+            if (radio._valueTracker) radio._valueTracker.setValue(!radio.checked);
+            if (checkedDesc && checkedDesc.set) checkedDesc.set.call(radio, true);
+            else radio.checked = true;
+
+            const labelFor = radio.id ? document.querySelector(`label[for="${CSS.escape(radio.id)}"]`) : null;
             const parentLabel = radio.closest('label');
-            if (parentLabel) {
-              try { parentLabel.click(); } catch (e) {}
-            }
+            const clickEl = labelFor || parentLabel || radio;
+            try { radio.focus(); } catch (e) {}
+            try { clickEl.click(); } catch (e) {}
+
             radio.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
             radio.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
             radio.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
@@ -411,31 +742,43 @@ function executeAutoFill(mappings) {
 
       // Checkbox handling
       if (type === 'checkbox') {
-        const valLower = mapping.extractedValue.toLowerCase().trim();
-        const shouldCheck = ['true', 'yes', '1', 'checked', 'agree', 'y'].includes(valLower) ||
+        const elLabel = (getFieldLabel(el) || '').toLowerCase();
+        const optLabel = el.id ? (document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText || '').toLowerCase() : '';
+        const shouldCheck =
+          ['true', 'yes', '1', 'checked', 'agree', 'y'].includes(valLower) ||
+          (optLabel && valLower.includes(optLabel)) ||
           valLower.includes((el.value || '').toLowerCase());
-        el.checked = shouldCheck;
-        try { el.focus(); } catch (e) {}
-        const parentLabel = el.closest('label');
-        if (parentLabel) {
-          try { parentLabel.click(); } catch (e) {}
+
+        if (el.checked !== shouldCheck) {
+          const labelFor = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
+          const parentLabel = el.closest('label');
+          const clickEl = labelFor || parentLabel || el;
+          try { el.focus(); } catch (e) {}
+          try { clickEl.click(); } catch (e) {}
+
+          if (el.checked !== shouldCheck) {
+            const proto = window.HTMLInputElement.prototype;
+            const checkedDesc = Object.getOwnPropertyDescriptor(proto, 'checked');
+            if (el._valueTracker) el._valueTracker.setValue(!shouldCheck);
+            if (checkedDesc && checkedDesc.set) checkedDesc.set.call(el, shouldCheck);
+            else el.checked = shouldCheck;
+
+            el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+          }
         }
-        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+
+        try { el.dispatchEvent(new Event('blur', { bubbles: true, composed: true })); } catch (e) {}
         fillResults.filledCount++;
         fillResults.filledFields.push(mapping.targetField);
         continue;
       }
 
-      // Input / Textarea / Select handling with date format normalization
-      const normalizedValue = normalizeDateValue(mapping.extractedValue, type);
+      // Standard text / email / tel / textarea / select handling
+      const normalizedValue = normalizeDateValue(valStr, type, el);
       setNativeValue(el, normalizedValue);
 
-      // Verify that value was actually populated
-      const verified = (el.value && el.value.length > 0) || el.selectedIndex >= 0;
-
-      // Visual feedback: soft green background to clearly indicate auto-filled field
+      // Visual feedback: soft green background
       el.style.backgroundColor = '#ecfdf5';
       el.style.borderColor = '#10b981';
       el.style.transition = 'all 0.4s ease';
@@ -447,43 +790,14 @@ function executeAutoFill(mappings) {
       fillResults.filledCount++;
       fillResults.filledFields.push(mapping.targetField);
     } else {
-      // Check if this mapping is a Date of Birth and the form has split DOB fields (Day, Month, Year separate)
-      const isDob = (mapping.targetField || '').toLowerCase().includes('birth') ||
-        (mapping.targetField || '').toLowerCase().includes('dob');
-      if (isDob && mapping.extractedValue) {
-        const splitFilled = fillSplitDateFields(allInputs, mapping.extractedValue);
+      // Check if this mapping is a Date of Birth and the form has split DOB fields
+      const isDob = targetLabelLower.includes('birth') || targetLabelLower.includes('dob');
+      if (isDob && valStr) {
+        const splitFilled = fillSplitDateFields(allInputs, valStr);
         if (splitFilled) {
           fillResults.filledCount++;
           fillResults.filledFields.push(mapping.targetField + ' (Split Date)');
           continue;
-        }
-      }
-
-      // Check if this mapping is Full Name and the form has separate First Name / Last Name fields
-      const isName = (mapping.targetField || '').toLowerCase().includes('name') &&
-        !(mapping.targetField || '').toLowerCase().includes('father') &&
-        !(mapping.targetField || '').toLowerCase().includes('board');
-      if (isName && mapping.extractedValue) {
-        const parts = mapping.extractedValue.trim().split(/\s+/);
-        if (parts.length >= 2) {
-          const firstPart = parts[0];
-          const lastPart = parts.slice(1).join(' ');
-          const fnEl = document.querySelector('#firstName, input[name="firstName"], input[name="first_name"]');
-          const lnEl = document.querySelector('#lastName, input[name="lastName"], input[name="last_name"]');
-          let nameFilled = false;
-          if (fnEl && !fnEl.value) {
-            setNativeValue(fnEl, firstPart);
-            nameFilled = true;
-          }
-          if (lnEl && !lnEl.value) {
-            setNativeValue(lnEl, lastPart);
-            nameFilled = true;
-          }
-          if (nameFilled) {
-            fillResults.filledCount++;
-            fillResults.filledFields.push(mapping.targetField + ' (Split Name)');
-            continue;
-          }
         }
       }
 
@@ -543,15 +857,24 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 
     if (request.action === 'AUTOFILL_FORM' || request.action === 'SMARTFORM_AUTO_FILL_DOM') {
       const mappings = request.mappings || request.payload?.mappings || [];
-      const results = executeAutoFill(mappings);
-      sendResponse({
-        status: 'success',
-        success: true,
-        results,
-        filledCount: results.filledCount,
-        filledFields: results.filledFields,
-        unfilledRequiredFields: results.unfilledRequiredFields,
-      });
+      executeAutoFill(mappings)
+        .then((finalRes) => {
+          sendResponse({
+            status: 'success',
+            success: true,
+            results: finalRes,
+            filledCount: finalRes.filledCount,
+            filledFields: finalRes.filledFields,
+            unfilledRequiredFields: finalRes.unfilledRequiredFields,
+          });
+        })
+        .catch((err) => {
+          sendResponse({
+            status: 'error',
+            success: false,
+            error: err.message,
+          });
+        });
       return true;
     }
 
@@ -582,17 +905,18 @@ window.addEventListener('message', (event) => {
     if (action === 'AUTOFILL_FORM' || action === 'SMARTFORM_AUTO_FILL_DOM') {
       const formEl = document.querySelector('form, #candidate_name, input[name="candidate_name"], #dob, #father_name');
       if (formEl && window.location.pathname.includes('live-test-form')) {
-        const localResults = executeAutoFill(payload?.mappings || []);
-        window.postMessage({
-          type: 'SMARTFORM_INVOKE_RESPONSE',
-          id,
-          success: true,
-          status: 'success',
-          filledCount: localResults.filledCount,
-          filledFields: localResults.filledFields,
-          manualFields: localResults.unfilledRequiredFields,
-          results: localResults,
-        }, '*');
+        executeAutoFill(payload?.mappings || []).then((localResults) => {
+          window.postMessage({
+            type: 'SMARTFORM_INVOKE_RESPONSE',
+            id,
+            success: true,
+            status: 'success',
+            filledCount: localResults.filledCount,
+            filledFields: localResults.filledFields,
+            manualFields: localResults.unfilledRequiredFields,
+            results: localResults,
+          }, '*');
+        });
         return;
       }
     }

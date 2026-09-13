@@ -141,14 +141,18 @@ export default function App() {
             resolvedOrigin = new URL(resolvedUrl).origin;
           } catch {}
 
-          // Inspect the target tab's real DOM fields
-          try {
-            const inspRes = await inspectFormTab({ tabId: extOpenRes.tabId, url: resolvedUrl });
-            if (inspRes.success && Array.isArray(inspRes.fields) && inspRes.fields.length > 0) {
-              detectedFields = inspRes.fields;
+          if (Array.isArray((extOpenRes as any).fields) && (extOpenRes as any).fields.length > 0) {
+            detectedFields = (extOpenRes as any).fields;
+          } else {
+            // Inspect the target tab's real DOM fields
+            try {
+              const inspRes = await inspectFormTab({ tabId: extOpenRes.tabId, url: resolvedUrl });
+              if (inspRes.success && Array.isArray(inspRes.fields) && inspRes.fields.length > 0) {
+                detectedFields = inspRes.fields;
+              }
+            } catch (inspErr) {
+              console.warn('[Extension Bridge] DOM inspection fallback to server-side parser:', inspErr);
             }
-          } catch (inspErr) {
-            console.warn('[Extension Bridge] DOM inspection fallback to server-side parser:', inspErr);
           }
         }
       } catch (extErr) {
