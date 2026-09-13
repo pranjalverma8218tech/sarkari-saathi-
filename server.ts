@@ -18,6 +18,7 @@ dotenv.config();
 
 import { ai } from './src/server/ai.js';
 import { db } from './src/server/db.js';
+import { inspectTargetPage } from './src/server/form-inspector.js';
 import { renderErrorHtml, renderMobileUploadHtml } from './src/server/mobile-portal.js';
 import {
   ApplicationSession,
@@ -508,29 +509,9 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
       const resolvedPastedUrl = resolvedMode === 'URL_PASTE' ? (pastedUrl || activeUrl) : undefined;
       const exactInspectedUrl = resolvedMode === 'EXTENSION_INSPECTION' ? (inspectedUrl || activeUrl) : (inspectedUrl || undefined);
 
-      // If detectedFields was not provided by the extension, extract standard fields
-      // or inspect live-test-form if it's the test URL
-      let fieldsToAnalyze: DetectedField[] = detectedFields;
-
-      if (!fieldsToAnalyze || fieldsToAnalyze.length === 0) {
-        // Provide standard comprehensive fields typical of public entrance / recruitment portals
-        fieldsToAnalyze = [
-          { fieldType: 'text', label: "Candidate's Full Name", name: 'candidate_name', id: 'candidate_name', selector: '#candidate_name', required: true },
-          { fieldType: 'text', label: "Father's / Guardian's Name", name: 'father_name', id: 'father_name', selector: '#father_name', required: true },
-          { fieldType: 'date', label: 'Date of Birth', name: 'dob', id: 'dob', selector: '#dob', required: true },
-          { fieldType: 'radio', label: 'Gender', name: 'gender', id: '', selector: 'input[name="gender"]', required: true, options: ['Male', 'Female', 'Other'] },
-          { fieldType: 'select', label: 'Reservation Category', name: 'category', id: 'category', selector: '#category', required: true, options: ['General', 'OBC', 'SC', 'ST', 'EWS'] },
-          { fieldType: 'text', label: 'Identity Proof / Aadhaar Number', name: 'aadhaar_number', id: 'aadhaar_number', selector: '#aadhaar_number', required: false },
-          { fieldType: 'text', label: '10th Roll Number', name: 'roll_number_10th', id: 'roll_number_10th', selector: '#roll_number_10th', required: true },
-          { fieldType: 'text', label: '10th Passing Year', name: 'passing_year_10th', id: 'passing_year_10th', selector: '#passing_year_10th', required: true },
-          { fieldType: 'text', label: '10th Examination Board Name', name: 'board_name_10th', id: 'board_name_10th', selector: '#board_name_10th', required: true },
-          { fieldType: 'text', label: 'Percentage or CGPA Obtained', name: 'marks_percentage_10th', id: 'marks_percentage_10th', selector: '#marks_percentage_10th', required: false },
-          { fieldType: 'tel', label: 'Candidate Mobile Number', name: 'mobile_number', id: 'mobile_number', selector: '#mobile_number', required: true },
-          { fieldType: 'email', label: 'Candidate Email Address', name: 'email_address', id: 'email_address', selector: '#email_address', required: true },
-          { fieldType: 'textarea', label: 'Permanent Residential Address', name: 'permanent_address', id: 'permanent_address', selector: '#permanent_address', required: false },
-          { fieldType: 'file', label: 'Passport Size Photograph', name: 'candidate_photo', id: 'candidate_photo', selector: '#candidate_photo', required: true },
-        ];
-      }
+      // Inspect real DOM fields from the target page (avoiding hardcoded mock selectors)
+      const inspectionResult = await inspectTargetPage(activeUrl, detectedFields);
+      const fieldsToAnalyze: DetectedField[] = inspectionResult.fields;
 
       // Run real Gemini analysis
       const analysis = await ai.analyzeForm(fieldsToAnalyze, formUrl);

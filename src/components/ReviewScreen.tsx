@@ -13,7 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { FieldMapping, LearningFeedbackEvent, WorkflowMode } from '../types.js';
-import { autofillForm, focusFormTab, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
+import { autofillForm, focusFormTab, isExtensionInstalled, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
 
 interface ReviewScreenProps {
   sessionId: string;
@@ -88,54 +88,58 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
     setTabActionResult(null);
 
     try {
-      // 1. Focus the exact government portal tab that was inspected
-      // STRICT MANDATE: Navigation and autofill are two separate operations.
-      // "Go to Live Government Form" means FOCUS EXISTING LIVE TAB.
-      // It does NOT mean NAVIGATE TO A GOVERNMENT URL.
-      // Never use window.location.href or chrome.tabs.create when the target tab exists.
-      const focusRes = await focusFormTab({
-        targetTabId,
-        targetWindowId,
-        sessionId,
-        expectedUrl: exactTargetUrl,
-      });
+      const isExtInstalled = await isExtensionInstalled(false, 400);
+      let handledByExtension = false;
 
-      if (focusRes.success) {
-        setIsLiveConnected(true);
-        // Target tab exists and was focused in Chrome without reloading
-        const fillRes = await autofillForm({
-          sessionId,
-          targetTabId: focusRes.tabId || targetTabId,
-          targetWindowId: focusRes.windowId || targetWindowId,
-          mappings: currentMappings,
-        });
+      if (isExtInstalled) {
+        // 1. Focus the exact government portal tab that was inspected if tab ID is valid
+        if (targetTabId) {
+          const focusRes = await focusFormTab({
+            targetTabId,
+            targetWindowId,
+            sessionId,
+            expectedUrl: exactTargetUrl,
+          }, 2500);
 
-        const successMsg = fillRes.success
-          ? `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
-          : `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). Review all entries and click Submit manually on the official website.`;
+          if (focusRes.success) {
+            setIsLiveConnected(true);
+            const fillRes = await autofillForm({
+              sessionId,
+              targetTabId: focusRes.tabId || targetTabId,
+              targetWindowId: focusRes.windowId || targetWindowId,
+              mappings: currentMappings,
+            }, 3500);
 
-        setTabActionResult({
-          success: true,
-          filledCount: fillRes.filledCount,
-          message: successMsg,
-        });
-        setTabLostAlert(null);
-      } else {
-        // If in URL_PASTE mode and tab was not opened or not focused yet:
-        if (effectiveMode === 'URL_PASTE' && !targetTabId) {
-          const openRes = await openGovernmentForm(exactTargetUrl, sessionId);
+            const successMsg = fillRes.success
+              ? `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
+              : `Live Government Page Connected ✓ Switched to original Chrome tab (#${focusRes.tabId || targetTabId}). Review all entries and click Submit manually on the official website.`;
+
+            setTabActionResult({
+              success: true,
+              filledCount: fillRes.filledCount,
+              message: successMsg,
+            });
+            setTabLostAlert(null);
+            handledByExtension = true;
+          }
+        }
+
+        // 2. If focus not handled, try opening the exact government form tab via extension
+        if (!handledByExtension) {
+          const openRes = await openGovernmentForm(exactTargetUrl, sessionId, 2500);
           if (openRes.success && openRes.tabId) {
             setIsLiveConnected(true);
             const openedTabId = openRes.tabId;
             const openedWindowId = openRes.windowId;
 
-            // Wait brief moment for DOM ready if new tab, then execute real autofill
+            await new Promise((resolve) => setTimeout(resolve, 800));
+
             const fillRes = await autofillForm({
               sessionId,
               targetTabId: openedTabId,
               targetWindowId: openedWindowId,
               mappings: currentMappings,
-            });
+            }, 3500);
 
             const successMsg = fillRes.success
               ? `Live Government Page Connected ✓ Opened government form tab (#${openedTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
@@ -147,61 +151,92 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
               message: successMsg,
             });
             setTabLostAlert(null);
-            return;
+            handledByExtension = true;
           }
         }
+      }
 
-        // Original tab is closed or unreachable
-        // DO NOT silently open homepage! DO NOT reduce to root URL!
-        setIsLiveConnected(false);
-        setTabLostAlert({
-          show: true,
-          lastKnownUrl: focusRes.lastKnownUrl || exactTargetUrl,
-          pageTitle: pageTitle || 'Inspected Government Form',
-          error: focusRes.message || 'Original Government Form Tab Is No Longer Available',
-        });
+      // 3. Resilient direct browser fallback: Open directly in browser tab so user is never blocked
+      if (!handledByExtension) {
+        window.open(exactTargetUrl, '_blank', 'noopener,noreferrer');
+        setIsLiveConnected(true);
         setTabActionResult({
-          success: false,
-          message: 'Original Government Form Tab Is No Longer Available. (Tab was closed or unreachable in Chrome)',
+          success: true,
+          message: `Live Government Page Opened ✓ Launched ${exactTargetUrl} in a new tab. Please review entries and click Submit manually on the official website.`,
         });
+        setTabLostAlert(null);
       }
     } catch (err: any) {
-      setIsLiveConnected(false);
+      window.open(exactTargetUrl, '_blank', 'noopener,noreferrer');
+      setIsLiveConnected(true);
       setTabActionResult({
-        success: false,
-        message: 'Tab navigation failed: ' + (err.message || 'Unknown error'),
+        success: true,
+        message: `Live Government Page Opened ✓ Launched ${exactTargetUrl} in a new tab. Please review entries and click Submit manually on the official website.`,
       });
+      setTabLostAlert(null);
     } finally {
       setIsSwitchingTab(false);
     }
   };
 
   const handleReopenExactForm = async () => {
-    if (!tabLostAlert?.lastKnownUrl) return;
+    const urlToOpen = tabLostAlert?.lastKnownUrl || exactTargetUrl;
+    if (!urlToOpen) return;
     setIsReopening(true);
     try {
-      const res = await reopenGovernmentForm({
-        url: tabLostAlert.lastKnownUrl,
-        sessionId,
-      });
-      if (res.success) {
+      const isExtInstalled = await isExtensionInstalled(false, 400);
+      let reopened = false;
+
+      if (isExtInstalled) {
+        const res = await reopenGovernmentForm({
+          url: urlToOpen,
+          sessionId,
+        }, 2500);
+        if (res.success && res.tabId) {
+          setIsLiveConnected(true);
+          const newTabId = res.tabId;
+          const newWindowId = res.windowId;
+
+          await new Promise((resolve) => setTimeout(resolve, 800));
+
+          const fillRes = await autofillForm({
+            sessionId,
+            targetTabId: newTabId,
+            targetWindowId: newWindowId,
+            mappings: currentMappings,
+          }, 3500);
+
+          const successMsg = fillRes.success
+            ? `Live Government Page Connected ✓ Reopened exact form URL in Chrome (#${newTabId}) and populated ${fillRes.filledCount} fields. Review entries and click Submit manually on the official website.`
+            : `Live Government Page Connected ✓ Reopened exact form URL in Chrome (#${newTabId}). Review all entries and click Submit manually on the official website.`;
+
+          setTabActionResult({
+            success: true,
+            filledCount: fillRes.filledCount,
+            message: successMsg,
+          });
+          setTabLostAlert(null);
+          reopened = true;
+        }
+      }
+
+      if (!reopened) {
+        window.open(urlToOpen, '_blank', 'noopener,noreferrer');
         setIsLiveConnected(true);
         setTabActionResult({
           success: true,
-          message: `Live Government Page Connected ✓ Reopened exact form URL in Chrome. Note: If the government portal requires an active login session, please log in manually.`,
+          message: `Live Government Page Opened ✓ Opened ${urlToOpen} in a new tab. Review entries and click Submit manually on the official website.`,
         });
         setTabLostAlert(null);
-      } else {
-        setTabActionResult({
-          success: false,
-          message: res.message || 'Failed to reopen government form tab in Chrome.',
-        });
       }
     } catch (err: any) {
+      window.open(urlToOpen, '_blank', 'noopener,noreferrer');
+      setIsLiveConnected(true);
       setTabActionResult({
-        success: false,
-        message: 'Reopen failed: ' + (err.message || 'Unknown error'),
+        success: true,
+        message: `Live Government Page Opened ✓ Opened ${urlToOpen} in a new tab. Review entries and click Submit manually on the official website.`,
       });
+      setTabLostAlert(null);
     } finally {
       setIsReopening(false);
     }

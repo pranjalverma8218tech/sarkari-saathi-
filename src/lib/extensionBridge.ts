@@ -69,14 +69,25 @@ export interface FormStatusResult {
   error?: string;
 }
 
+export interface InspectFormTabResult {
+  success: boolean;
+  tabId?: number;
+  url?: string;
+  title?: string;
+  fields?: any[];
+  error?: string;
+}
+
 function generateRequestId(): string {
   return 'req_' + Math.random().toString(36).slice(2, 11) + '_' + Date.now();
 }
 
+let cachedExtensionStatus: { installed: boolean; checkedAt: number } | null = null;
+
 /**
  * Checks if the SmartForm AI Chrome Extension is installed and active in the browser.
  */
-export async function pingExtension(timeoutMs = 1200): Promise<{ installed: boolean; version?: string }> {
+export async function pingExtension(timeoutMs = 800): Promise<{ installed: boolean; version?: string }> {
   if (typeof window === 'undefined') {
     return { installed: false };
   }
@@ -105,6 +116,7 @@ export async function pingExtension(timeoutMs = 1200): Promise<{ installed: bool
           clearTimeout(timer);
           window.removeEventListener('message', listener);
           (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+          cachedExtensionStatus = { installed: true, checkedAt: Date.now() };
           resolve({ installed: true, version: event.data.version || '1.0.3' });
         }
       }
@@ -116,9 +128,32 @@ export async function pingExtension(timeoutMs = 1200): Promise<{ installed: bool
 }
 
 /**
+ * Cached check to determine whether the companion extension is active in the current tab.
+ */
+export async function isExtensionInstalled(forceCheck = false, timeoutMs = 400): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  if ((window as any).__SMARTFORM_EXTENSION_INSTALLED__) return true;
+
+  const now = Date.now();
+  if (!forceCheck && cachedExtensionStatus && (now - cachedExtensionStatus.checkedAt < 4000)) {
+    return cachedExtensionStatus.installed;
+  }
+
+  const pingRes = await pingExtension(timeoutMs);
+  cachedExtensionStatus = { installed: pingRes.installed, checkedAt: now };
+  return pingRes.installed;
+}
+
+/**
  * Invokes an action on the Chrome Extension via the content script bridge.
  */
-function invokeExtensionAction<T>(action: string, payload: Record<string, any>, timeoutMs = 4000): Promise<T> {
+async function invokeExtensionAction<T>(action: string, payload: Record<string, any>, timeoutMs = 3500): Promise<T> {
+  // Pre-flight check: If extension is known not to be installed, don't stall the UI
+  const installed = await isExtensionInstalled(false, 400);
+  if (!installed) {
+    throw new Error(`EXTENSION_NOT_ACTIVE: SmartForm AI companion extension is not active in this browser session.`);
+  }
+
   return new Promise((resolve, reject) => {
     const id = generateRequestId();
     let settled = false;
@@ -256,7 +291,7 @@ export async function autofillForm(
     targetWindowId?: number;
     mappings: FieldMapping[];
   },
-  timeoutMs = 6000
+  timeoutMs = 4500
 ): Promise<AutofillFormResult> {
   try {
     const res = await invokeExtensionAction<AutofillFormResult>(
@@ -271,13 +306,16 @@ export async function autofillForm(
     );
     return res;
   } catch (err: any) {
+    const isNotActive = err.message?.includes('EXTENSION_NOT_ACTIVE') || err.message?.includes('EXTENSION_TIMEOUT');
     return {
       success: false,
       filledCount: 0,
       filledFields: [],
-      manualFields: [],
-      error: 'AUTOFILL_COMMUNICATION_FAILED',
-      message: err.message || 'Failed to communicate auto-fill command to Chrome extension.',
+      manualFields: (params.mappings || []).map((m) => m.targetField),
+      error: isNotActive ? 'EXTENSION_NOT_ACTIVE' : 'AUTOFILL_COMMUNICATION_FAILED',
+      message: isNotActive
+        ? 'Companion Chrome extension is not active in this browser. You can click "Go to Live Government Form" to open the form directly.'
+        : (err.message || 'Failed to communicate auto-fill command to Chrome extension.'),
     };
   }
 }
@@ -303,6 +341,32 @@ export async function getFormStatus(
     return {
       success: false,
       tabExists: false,
+      error: err.message,
+    };
+  }
+}
+
+/**
+ * Inspects form fields from a specific Chrome tab via the extension.
+ */
+export async function inspectFormTab(
+  params: { tabId: number; url?: string },
+  timeoutMs = 6000
+): Promise<InspectFormTabResult> {
+  try {
+    const res = await invokeExtensionAction<InspectFormTabResult>(
+      'INSPECT_FORM_TAB',
+      {
+        tabId: params.tabId,
+        url: params.url,
+      },
+      timeoutMs
+    );
+    return res;
+  } catch (err: any) {
+    return {
+      success: false,
+      fields: [],
       error: err.message,
     };
   }

@@ -154,7 +154,7 @@ function setNativeValue(element, value) {
     // Handle React internal tracker (React 15/16/17/18/19 _valueTracker)
     const tracker = element._valueTracker;
     if (tracker) {
-      tracker.setValue('' + (value || ''));
+      tracker.setValue(String(value) === '' ? '__initial__' : '');
     }
 
     if (valueDescriptor && valueDescriptor.set) {
@@ -167,7 +167,18 @@ function setNativeValue(element, value) {
     element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
-    return true;
+
+    // Verify the resulting value
+    let verified = element.value === String(value);
+    if (!verified) {
+      try {
+        element.value = value;
+        element.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: String(value) }));
+        element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        verified = element.value === String(value);
+      } catch (e) {}
+    }
+    return verified;
   } else if (isSelect) {
     // Match option by value or text
     let matched = false;
@@ -183,12 +194,18 @@ function setNativeValue(element, value) {
       }
     }
     if (!matched && element.options.length > 0) {
-      element.value = value;
+      const proto = window.HTMLSelectElement.prototype;
+      const valueDescriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (valueDescriptor && valueDescriptor.set) {
+        valueDescriptor.set.call(element, value);
+      } else {
+        element.value = value;
+      }
     }
     element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
-    return true;
+    return element.selectedIndex >= 0 || Boolean(element.value);
   }
   return false;
 }
@@ -442,6 +459,34 @@ function executeAutoFill(mappings) {
         }
       }
 
+      // Check if this mapping is Full Name and the form has separate First Name / Last Name fields
+      const isName = (mapping.targetField || '').toLowerCase().includes('name') &&
+        !(mapping.targetField || '').toLowerCase().includes('father') &&
+        !(mapping.targetField || '').toLowerCase().includes('board');
+      if (isName && mapping.extractedValue) {
+        const parts = mapping.extractedValue.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const firstPart = parts[0];
+          const lastPart = parts.slice(1).join(' ');
+          const fnEl = document.querySelector('#firstName, input[name="firstName"], input[name="first_name"]');
+          const lnEl = document.querySelector('#lastName, input[name="lastName"], input[name="last_name"]');
+          let nameFilled = false;
+          if (fnEl && !fnEl.value) {
+            setNativeValue(fnEl, firstPart);
+            nameFilled = true;
+          }
+          if (lnEl && !lnEl.value) {
+            setNativeValue(lnEl, lastPart);
+            nameFilled = true;
+          }
+          if (nameFilled) {
+            fillResults.filledCount++;
+            fillResults.filledFields.push(mapping.targetField + ' (Split Name)');
+            continue;
+          }
+        }
+      }
+
       fillResults.skippedFields.push(mapping.targetField);
     }
   }
@@ -486,31 +531,33 @@ function executeAutoFill(mappings) {
 }
 
 // Listen for Chrome runtime messages
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (!request) return false;
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!request) return false;
 
-  if (request.action === 'SMARTFORM_INSPECT_DOM') {
-    const data = inspectLiveForm();
-    sendResponse({ status: 'success', success: true, data });
-    return true;
-  }
+    if (request.action === 'SMARTFORM_INSPECT_DOM') {
+      const data = inspectLiveForm();
+      sendResponse({ status: 'success', success: true, data });
+      return true;
+    }
 
-  if (request.action === 'AUTOFILL_FORM' || request.action === 'SMARTFORM_AUTO_FILL_DOM') {
-    const mappings = request.mappings || request.payload?.mappings || [];
-    const results = executeAutoFill(mappings);
-    sendResponse({
-      status: 'success',
-      success: true,
-      results,
-      filledCount: results.filledCount,
-      filledFields: results.filledFields,
-      unfilledRequiredFields: results.unfilledRequiredFields,
-    });
-    return true;
-  }
+    if (request.action === 'AUTOFILL_FORM' || request.action === 'SMARTFORM_AUTO_FILL_DOM') {
+      const mappings = request.mappings || request.payload?.mappings || [];
+      const results = executeAutoFill(mappings);
+      sendResponse({
+        status: 'success',
+        success: true,
+        results,
+        filledCount: results.filledCount,
+        filledFields: results.filledFields,
+        unfilledRequiredFields: results.unfilledRequiredFields,
+      });
+      return true;
+    }
 
-  return false;
-});
+    return false;
+  });
+}
 
 // Communication bridge for SmartForm AI web app running in browser
 window.addEventListener('message', (event) => {

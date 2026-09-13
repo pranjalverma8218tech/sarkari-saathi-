@@ -129,6 +129,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // 7. INSPECT_FORM_TAB (Live tab inspection)
+  if (message.action === 'INSPECT_FORM_TAB') {
+    handleInspectFormTab(message, sendResponse);
+    return true;
+  }
+
   return false;
 });
 
@@ -573,6 +579,38 @@ function handleGetFormStatus(message, sendResponse) {
       tabId: tab.id,
       url: tab.url,
       title: tab.title,
+    });
+  });
+}
+
+/**
+ * Handles INSPECT_FORM_TAB to extract live DOM fields from an open government form tab.
+ */
+function handleInspectFormTab(message, sendResponse) {
+  const tabId = message.tabId || activeTabContext.tabId;
+  if (!tabId) {
+    sendResponse({ success: false, error: 'NO_TAB_ID', fields: [] });
+    return;
+  }
+
+  ensureContentScriptInjected(tabId, () => {
+    chrome.tabs.sendMessage(tabId, { action: 'SMARTFORM_INSPECT_DOM' }, (resp) => {
+      if (chrome.runtime.lastError || !resp || !resp.data) {
+        sendResponse({
+          success: false,
+          tabId,
+          error: chrome.runtime.lastError ? chrome.runtime.lastError.message : 'INSPECT_FAILED',
+          fields: [],
+        });
+        return;
+      }
+      sendResponse({
+        success: true,
+        tabId,
+        url: resp.data.url,
+        title: resp.data.title,
+        fields: resp.data.fields || [],
+      });
     });
   });
 }

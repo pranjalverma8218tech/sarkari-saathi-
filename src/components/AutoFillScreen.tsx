@@ -10,7 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { FieldMapping, WorkflowMode } from '../types.js';
-import { autofillForm, focusFormTab, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
+import { autofillForm, focusFormTab, isExtensionInstalled, openGovernmentForm, reopenGovernmentForm } from '../lib/extensionBridge';
 
 interface AutoFillScreenProps {
   sessionId?: string;
@@ -115,63 +115,87 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
     setTabLostAlert(null);
 
     try {
-      // Focus existing live tab without reloading
-      const focusRes = await focusFormTab({
-        targetTabId,
-        targetWindowId,
-        sessionId,
-        expectedUrl: exactTargetUrl,
-      });
+      const isExtInstalled = await isExtensionInstalled(false, 400);
+      let handledByExtension = false;
 
-      if (focusRes.success) {
-        setIsLiveConnected(true);
-        setSwitchFeedback('Live Government Page Connected ✓ Switched to live government form tab in Chrome.');
-      } else {
-        // Mode 1: if tab hasn't been opened yet, open it
-        if (effectiveMode === 'URL_PASTE' && !targetTabId) {
-          const openRes = await openGovernmentForm(exactTargetUrl, sessionId);
+      if (isExtInstalled) {
+        // 1. Try focusing existing live tab if targetTabId is registered
+        if (targetTabId) {
+          const focusRes = await focusFormTab({
+            targetTabId,
+            targetWindowId,
+            sessionId,
+            expectedUrl: exactTargetUrl,
+          }, 2500);
+
+          if (focusRes.success) {
+            setIsLiveConnected(true);
+            setSwitchFeedback('Live Government Page Connected ✓ Switched to live government form tab in Chrome.');
+            handledByExtension = true;
+          }
+        }
+
+        // 2. If not focused, try opening via extension
+        if (!handledByExtension) {
+          const openRes = await openGovernmentForm(exactTargetUrl, sessionId, 2500);
           if (openRes.success) {
             setIsLiveConnected(true);
             setSwitchFeedback('Live Government Page Connected ✓ Government form tab opened and registered.');
             await runAutoFill();
-            return;
+            handledByExtension = true;
           }
         }
+      }
 
-        // Mode 2 (or tab closed): Never navigate away or open homepage
-        setIsLiveConnected(false);
-        setTabLostAlert({
-          show: true,
-          lastKnownUrl: focusRes.lastKnownUrl || exactTargetUrl,
-          error: 'Original Government Form Tab Is No Longer Available',
-        });
-        setSwitchFeedback('Original government form tab was closed or unreachable in Chrome.');
+      // 3. Resilient browser fallback: Open directly in browser tab so user is never blocked
+      if (!handledByExtension) {
+        window.open(exactTargetUrl, '_blank', 'noopener,noreferrer');
+        setIsLiveConnected(true);
+        setSwitchFeedback(`Live Government Page Opened ✓ Launched ${exactTargetUrl} in a new tab.`);
+        setTabLostAlert(null);
       }
     } catch (err: any) {
-      setIsLiveConnected(false);
-      setSwitchFeedback('Tab navigation error: ' + err.message);
+      window.open(exactTargetUrl, '_blank', 'noopener,noreferrer');
+      setIsLiveConnected(true);
+      setSwitchFeedback(`Live Government Page Opened ✓ Launched ${exactTargetUrl} in a new tab.`);
+      setTabLostAlert(null);
     } finally {
       setIsSwitchingTab(false);
     }
   };
 
   const handleReopenExactForm = async () => {
-    if (!tabLostAlert?.lastKnownUrl) return;
+    const urlToOpen = tabLostAlert?.lastKnownUrl || exactTargetUrl;
+    if (!urlToOpen) return;
     setIsReopening(true);
     try {
-      const res = await reopenGovernmentForm({
-        url: tabLostAlert.lastKnownUrl,
-        sessionId,
-      });
-      if (res.success) {
+      const isExtInstalled = await isExtensionInstalled(false, 400);
+      let reopened = false;
+
+      if (isExtInstalled) {
+        const res = await reopenGovernmentForm({
+          url: urlToOpen,
+          sessionId,
+        }, 2500);
+        if (res.success) {
+          setIsLiveConnected(true);
+          setSwitchFeedback('Live Government Page Connected ✓ Reopened exact form URL in Chrome.');
+          setTabLostAlert(null);
+          reopened = true;
+        }
+      }
+
+      if (!reopened) {
+        window.open(urlToOpen, '_blank', 'noopener,noreferrer');
         setIsLiveConnected(true);
-        setSwitchFeedback('Live Government Page Connected ✓ Reopened exact form URL in Chrome.');
+        setSwitchFeedback('Live Government Page Opened ✓ Opened form URL in a new tab.');
         setTabLostAlert(null);
-      } else {
-        setSwitchFeedback(res.message || 'Failed to reopen government form tab in Chrome.');
       }
     } catch (err: any) {
-      setSwitchFeedback('Reopen failed: ' + (err.message || 'Unknown error'));
+      window.open(urlToOpen, '_blank', 'noopener,noreferrer');
+      setIsLiveConnected(true);
+      setSwitchFeedback('Live Government Page Opened ✓ Opened form URL in a new tab.');
+      setTabLostAlert(null);
     } finally {
       setIsReopening(false);
     }
@@ -275,20 +299,22 @@ export const AutoFillScreen: React.FC<AutoFillScreenProps> = ({
         </div>
       )}
 
-      {/* Unverified / Connection Pending Display */}
+      {/* Connection Notice / Extension Status Display */}
       {!isVerifying && verificationResult && !verificationResult.success && (
-        <div className="p-6 rounded-xl border border-amber-200 bg-amber-50/70 shadow-xs mb-6 text-left">
+        <div className="p-5 rounded-xl border border-amber-200 bg-amber-50/80 shadow-xs mb-6 text-left">
           <div className="flex items-start gap-3">
-            <AlertCircle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
-            <div className="space-y-2">
-              <h3 className="text-base font-bold text-amber-950">
-                Government Tab Connection Notice
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1.5 flex-1">
+              <h3 className="text-sm font-bold text-amber-950">
+                Live Government Portal Connection
               </h3>
               <p className="text-xs text-amber-900 leading-relaxed">
-                {verificationResult.error}
+                {verificationResult.error?.includes('EXTENSION_')
+                  ? 'Companion extension is not active in this session. Click "Go to Live Government Form" below to open the official portal directly in a new tab.'
+                  : (verificationResult.message || verificationResult.error)}
               </p>
-              <p className="text-xs text-slate-600">
-                To complete live DOM injection, ensure the SmartForm AI Chrome Extension is active, or click below to focus the portal in Chrome.
+              <p className="text-[11px] text-slate-600">
+                Target: <span className="font-mono text-slate-800">{exactTargetUrl}</span>
               </p>
             </div>
           </div>

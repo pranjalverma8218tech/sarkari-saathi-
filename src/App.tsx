@@ -11,8 +11,8 @@ import { MobileUploadView } from './components/MobileUploadView.js';
 import { ReviewScreen } from './components/ReviewScreen.js';
 import { StartScreen } from './components/StartScreen.js';
 import { StepIndicator } from './components/StepIndicator.js';
-import { ApplicationSession, FieldMapping, LearningFeedbackEvent, WorkflowMode } from './types.js';
-import { openGovernmentForm } from './lib/extensionBridge.js';
+import { ApplicationSession, DetectedField, FieldMapping, LearningFeedbackEvent, WorkflowMode } from './types.js';
+import { inspectFormTab, openGovernmentForm } from './lib/extensionBridge.js';
 
 export default function App() {
   // Check if current URL is a customer mobile upload view
@@ -128,6 +128,8 @@ export default function App() {
       let resolvedWinId = targetWindowId;
       let resolvedOrigin: string | undefined = undefined;
 
+      let detectedFields: DetectedField[] | undefined = undefined;
+
       try {
         const extOpenRes = await openGovernmentForm(resolvedUrl);
         if (extOpenRes.success && typeof extOpenRes.tabId === 'number') {
@@ -138,6 +140,16 @@ export default function App() {
           try {
             resolvedOrigin = new URL(resolvedUrl).origin;
           } catch {}
+
+          // Inspect the target tab's real DOM fields
+          try {
+            const inspRes = await inspectFormTab({ tabId: extOpenRes.tabId, url: resolvedUrl });
+            if (inspRes.success && Array.isArray(inspRes.fields) && inspRes.fields.length > 0) {
+              detectedFields = inspRes.fields;
+            }
+          } catch (inspErr) {
+            console.warn('[Extension Bridge] DOM inspection fallback to server-side parser:', inspErr);
+          }
         }
       } catch (extErr) {
         console.warn('[Extension Bridge] Could not communicate with extension directly:', extErr);
@@ -157,6 +169,7 @@ export default function App() {
           targetWindowId: resolvedWinId,
           targetOrigin: resolvedOrigin,
           origin: window.location.origin,
+          detectedFields,
         }),
       });
 
