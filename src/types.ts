@@ -116,8 +116,12 @@ export interface UploadTokenRecord {
   rawToken?: string;
   sessionId: string;
   applicationId: string;
+  workflowMode?: 'URL_PASTE' | 'EXTENSION_INSPECTION';
+  scope?: string;
+  formUrl?: string;
   requirementId: string;
   expectedDocumentType: string;
+  requiredDocuments?: DocumentRequirement[];
   createdAt: string;
   expiresAt: number;
   consumedAt: string | null;
@@ -126,10 +130,15 @@ export interface UploadTokenRecord {
 
 export interface ValidatedTokenInfo {
   tokenHash: string;
+  rawToken?: string;
   sessionId: string;
   applicationId: string;
+  workflowMode?: 'URL_PASTE' | 'EXTENSION_INSPECTION';
+  scope?: string;
+  formUrl?: string;
   requirementId: string;
   expectedDocumentType: string;
+  requiredDocuments?: DocumentRequirement[];
   createdAt: string;
   expiresAt: number;
   consumedAt: string | null;

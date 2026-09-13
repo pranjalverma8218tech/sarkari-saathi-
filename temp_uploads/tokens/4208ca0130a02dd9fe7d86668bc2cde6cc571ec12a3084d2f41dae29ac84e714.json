@@ -1,0 +1,12 @@
+{
+  "tokenHash": "4208ca0130a02dd9fe7d86668bc2cde6cc571ec12a3084d2f41dae29ac84e714",
+  "rawToken": "token_live_1789314003855",
+  "sessionId": "test_live_1789314003855",
+  "applicationId": "test_live_1789314003855",
+  "requirementId": "ALL",
+  "expectedDocumentType": "ALL",
+  "createdAt": "2026-09-13T15:40:03.856Z",
+  "expiresAt": 1789321203856,
+  "consumedAt": null,
+  "status": "active"
+}

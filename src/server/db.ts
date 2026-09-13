@@ -207,13 +207,25 @@ export const db = {
           .from('smartform_sessions')
           .download(`sessions/${id}.json`);
         if (data && !error) {
-          const raw = await data.text();
-          const parsed = JSON.parse(raw);
-          inMemorySessions.set(id, parsed);
-          // Cache locally to disk
-          const filePath = path.join(SESSIONS_STORAGE_DIR, `${id}.json`);
-          await fs.promises.writeFile(filePath, raw, 'utf8').catch(() => {});
-          return parsed;
+          let raw = '';
+          if (typeof (data as any).text === 'function') {
+            raw = await (data as any).text();
+          } else if (Buffer.isBuffer(data)) {
+            raw = data.toString('utf8');
+          } else if (typeof data === 'string') {
+            raw = data;
+          } else if (data instanceof ArrayBuffer) {
+            raw = Buffer.from(data).toString('utf8');
+          }
+
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            inMemorySessions.set(id, parsed);
+            // Cache locally to disk
+            const filePath = path.join(SESSIONS_STORAGE_DIR, `${id}.json`);
+            await fs.promises.writeFile(filePath, raw, 'utf8').catch(() => {});
+            return parsed;
+          }
         }
       } catch (err) {
         console.warn('[Database] Supabase session query failed:', err);
@@ -229,30 +241,70 @@ export const db = {
     applicationId: string,
     requirementId: string,
     expectedDocumentType: string,
-    lifetimeMinutes = 60
+    lifetimeMinutes = 60,
+    metadata?: {
+      workflowMode?: 'URL_PASTE' | 'EXTENSION_INSPECTION';
+      scope?: string;
+      requiredDocuments?: DocumentRequirement[];
+      formUrl?: string;
+    }
   ): Promise<UploadTokenRecord> {
-    const tokenHash = hashToken(token);
+    const cleanToken = token.trim().replace(/^['"]|['"]$/g, '');
+    const tokenHash = hashToken(cleanToken);
     const now = Date.now();
     const expiresAt = now + lifetimeMinutes * 60 * 1000;
 
     const record: UploadTokenRecord = {
       tokenHash,
-      rawToken: token,
+      rawToken: cleanToken,
       sessionId: applicationId,
       applicationId,
+      workflowMode: metadata?.workflowMode || 'URL_PASTE',
+      scope: metadata?.scope || (requirementId === 'ALL' ? 'SESSION_ALL_DOCS' : 'SINGLE_DOC'),
+      formUrl: metadata?.formUrl || '',
       requirementId,
       expectedDocumentType: expectedDocumentType.trim(),
+      requiredDocuments: metadata?.requiredDocuments,
       createdAt: new Date(now).toISOString(),
       expiresAt,
       consumedAt: null,
       status: 'active',
     };
 
-    // 1. L1 Memory Cache
-    inMemoryUploadTokens.set(token, record);
+    // 1. L3 Supabase Storage - Authoritative Single Source of Truth for Cross-Instance Sync
+    if (supabaseClient) {
+      try {
+        const jsonPayload = JSON.stringify(record);
+        const { error: upErr } = await supabaseClient.storage
+          .from('smartform_tokens')
+          .upload(`tokens/${tokenHash}.json`, jsonPayload, {
+            contentType: 'application/json',
+            upsert: true,
+          });
+
+        if (upErr) {
+          console.error('[Database] Supabase authoritative token upload failed:', upErr);
+        } else {
+          console.log(`[Database] Persisted authoritative token hash ${tokenHash.slice(0, 8)}... to Supabase smartform_tokens`);
+        }
+
+        // Also save indexed by cleanToken for direct lookup resilience
+        await supabaseClient.storage
+          .from('smartform_tokens')
+          .upload(`tokens/${cleanToken}.json`, jsonPayload, {
+            contentType: 'application/json',
+            upsert: true,
+          }).catch(() => {});
+      } catch (err) {
+        console.error('[Database] Supabase token sync exception:', err);
+      }
+    }
+
+    // 2. L1 Memory Cache (Optimization)
+    inMemoryUploadTokens.set(cleanToken, record);
     inMemoryUploadTokens.set(tokenHash, record);
 
-    // 2. L2 Local Disk Cache
+    // 3. L2 Local Disk Cache (Optimization)
     try {
       const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
       await fs.promises.writeFile(filePath, JSON.stringify(record, null, 2), 'utf8');
@@ -260,83 +312,95 @@ export const db = {
       console.warn('[Database] Local token disk write failed:', err);
     }
 
-    // 3. L3 Supabase Storage (Cross-instance accessible for real mobile phones)
-    if (supabaseClient) {
-      try {
-        await supabaseClient.storage
-          .from('smartform_tokens')
-          .upload(`tokens/${tokenHash}.json`, JSON.stringify(record), {
-            contentType: 'application/json',
-            upsert: true,
-          });
-      } catch (err) {
-        console.warn('[Database] Supabase token sync error:', err);
-      }
-    }
-
     return record;
   },
 
-  // Read-only token retrieval and validation. NEVER consumes or modifies the token.
+  // Authoritative token retrieval and validation. NEVER consumes or modifies the token.
   async getUploadToken(token: string): Promise<ValidatedTokenInfo | null> {
     if (!token || typeof token !== 'string') return null;
-    const tokenHash = hashToken(token);
+    const cleanToken = decodeURIComponent(token).trim().replace(/^['"]|['"]$/g, '');
+    if (!cleanToken) return null;
 
-    let storageTier: 'L1_memory' | 'L2_disk' | 'L3_supabase_storage' = 'L1_memory';
+    const is64Hex = /^[a-f0-9]{64}$/i.test(cleanToken);
+    const tokenHash = is64Hex ? cleanToken.toLowerCase() : hashToken(cleanToken);
+
+    let storageTier: 'L1_memory' | 'L2_disk' | 'L3_supabase_storage' = 'L3_supabase_storage';
     let record: UploadTokenRecord | null = null;
-    const cached = inMemoryUploadTokens.get(token) || inMemoryUploadTokens.get(tokenHash) || null;
 
-    // If cached in L1 and already consumed or expired, it can never become active again
-    if (cached && (cached.status === 'consumed' || Boolean(cached.consumedAt) || Date.now() > cached.expiresAt)) {
-      record = cached;
-      storageTier = 'L1_memory';
-    } else {
-      // 1. Check L2 Local Disk Cache
+    // 1. Authoritative Look-up: Query Supabase Storage first (Single Source of Truth)
+    if (supabaseClient) {
       try {
-        const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
-        if (fs.existsSync(filePath)) {
-          const raw = await fs.promises.readFile(filePath, 'utf8');
-          const diskRecord = JSON.parse(raw);
-          if (diskRecord) {
-            record = diskRecord;
-            storageTier = 'L2_disk';
+        let remoteData: any = null;
+        const res1 = await supabaseClient.storage
+          .from('smartform_tokens')
+          .download(`tokens/${tokenHash}.json`);
+
+        if (res1.data && !res1.error) {
+          remoteData = res1.data;
+        } else if (!is64Hex) {
+          const res2 = await supabaseClient.storage
+            .from('smartform_tokens')
+            .download(`tokens/${cleanToken}.json`);
+          if (res2.data && !res2.error) {
+            remoteData = res2.data;
           }
         }
-      } catch (err) {
-        console.warn('[Database] Local token disk read failed:', err);
-      }
 
-      // 2. Check L3 Supabase Storage if record is missing or still active (to catch cross-instance consumption)
-      if ((!record || record.status === 'active') && supabaseClient) {
-        try {
-          const { data, error } = await supabaseClient.storage
-            .from('smartform_tokens')
-            .download(`tokens/${tokenHash}.json`);
-          if (data && !error) {
-            const raw = await data.text();
-            const remoteRecord = JSON.parse(raw);
-            if (remoteRecord) {
-              record = remoteRecord;
+        if (remoteData) {
+          let raw = '';
+          if (typeof remoteData.text === 'function') {
+            raw = await remoteData.text();
+          } else if (Buffer.isBuffer(remoteData)) {
+            raw = remoteData.toString('utf8');
+          } else if (typeof remoteData === 'string') {
+            raw = remoteData;
+          } else if (remoteData instanceof ArrayBuffer) {
+            raw = Buffer.from(remoteData).toString('utf8');
+          } else if (typeof (remoteData as any).arrayBuffer === 'function') {
+            const ab = await (remoteData as any).arrayBuffer();
+            raw = Buffer.from(ab).toString('utf8');
+          }
+
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && (parsed.tokenHash || parsed.rawToken || parsed.sessionId)) {
+              record = parsed;
               storageTier = 'L3_supabase_storage';
-              // Sync to disk
+              // Update local caches with authoritative Supabase truth
+              inMemoryUploadTokens.set(cleanToken, record);
+              inMemoryUploadTokens.set(tokenHash, record);
               const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
               await fs.promises.writeFile(filePath, raw, 'utf8').catch(() => {});
             }
           }
-        } catch (err) {
-          // Supabase network warning ignored
         }
+      } catch (err) {
+        console.warn('[Database] Supabase authoritative token lookup notice:', err);
       }
+    }
 
-      // If neither disk nor remote yielded anything, fallback to cached
-      if (!record && cached) {
+    // 2. Fallback to Local Caches if Supabase is offline or returned nothing
+    if (!record) {
+      const cached = inMemoryUploadTokens.get(cleanToken) || inMemoryUploadTokens.get(tokenHash) || null;
+      if (cached) {
         record = cached;
         storageTier = 'L1_memory';
-      }
-
-      if (record) {
-        inMemoryUploadTokens.set(token, record);
-        inMemoryUploadTokens.set(tokenHash, record);
+      } else {
+        try {
+          const filePath = path.join(TOKENS_STORAGE_DIR, `${tokenHash}.json`);
+          if (fs.existsSync(filePath)) {
+            const raw = await fs.promises.readFile(filePath, 'utf8');
+            const diskRecord = JSON.parse(raw);
+            if (diskRecord) {
+              record = diskRecord;
+              storageTier = 'L2_disk';
+              inMemoryUploadTokens.set(cleanToken, record);
+              inMemoryUploadTokens.set(tokenHash, record);
+            }
+          }
+        } catch (err) {
+          console.warn('[Database] Local token disk read failed:', err);
+        }
       }
     }
 
@@ -345,7 +409,7 @@ export const db = {
     // Check validity state strictly (READ-ONLY)
     const isConsumed = record.status === 'consumed' || Boolean(record.consumedAt);
     const isExpiredByTime = Date.now() > record.expiresAt;
-    const isExpired = isConsumed || isExpiredByTime || record.status === 'expired';
+    const isExpired = isExpiredByTime || record.status === 'expired';
 
     let currentStatus: 'active' | 'consumed' | 'expired' = record.status;
     if (isConsumed) {
@@ -356,10 +420,15 @@ export const db = {
 
     return {
       tokenHash: record.tokenHash,
+      rawToken: record.rawToken || cleanToken,
       sessionId: record.sessionId || record.applicationId,
       applicationId: record.applicationId || record.sessionId,
+      workflowMode: record.workflowMode,
+      scope: record.scope,
+      formUrl: record.formUrl,
       requirementId: record.requirementId,
       expectedDocumentType: record.expectedDocumentType,
+      requiredDocuments: record.requiredDocuments,
       createdAt: record.createdAt,
       expiresAt: record.expiresAt,
       consumedAt: record.consumedAt,
@@ -371,10 +440,12 @@ export const db = {
   },
 
   // Atomically consume token. Only succeeds if currently active and unconsumed.
-  // Note: For session-level tokens (requirementId === 'ALL'), the token is preserved until force=true
+  // Note: For multi-document session tokens (requirementId === 'ALL' or scope === 'SESSION_ALL_DOCS'),
+  // the token is preserved until all documents are verified or force=true
   async consumeUploadToken(token: string, force = false): Promise<{ success: boolean; reason?: string; isSessionToken?: boolean }> {
     if (!token || typeof token !== 'string') return { success: false, reason: 'missing_token' };
-    const tokenHash = hashToken(token);
+    const cleanToken = decodeURIComponent(token).trim().replace(/^['"]|['"]$/g, '');
+    const tokenHash = /^[a-f0-9]{64}$/i.test(cleanToken) ? cleanToken.toLowerCase() : hashToken(cleanToken);
 
     // Check current state
     const current = await this.getUploadToken(token);
@@ -389,18 +460,22 @@ export const db = {
     }
 
     // If it's a multi-document session token and force is not requested, keep active for remaining documents
-    if (current.requirementId === 'ALL' && !force) {
+    if ((current.requirementId === 'ALL' || current.scope === 'SESSION_ALL_DOCS') && !force) {
       return { success: true, isSessionToken: true };
     }
 
     const consumedAt = new Date().toISOString();
     const updatedRecord: UploadTokenRecord = {
       tokenHash: current.tokenHash,
-      rawToken: token,
+      rawToken: current.rawToken || cleanToken,
       sessionId: current.sessionId,
       applicationId: current.applicationId,
+      workflowMode: current.workflowMode,
+      scope: current.scope,
+      formUrl: current.formUrl,
       requirementId: current.requirementId,
       expectedDocumentType: current.expectedDocumentType,
+      requiredDocuments: current.requiredDocuments,
       createdAt: current.createdAt,
       expiresAt: current.expiresAt,
       consumedAt,
@@ -408,7 +483,7 @@ export const db = {
     };
 
     // 1. Update L1 Memory Cache
-    inMemoryUploadTokens.set(token, updatedRecord);
+    inMemoryUploadTokens.set(cleanToken, updatedRecord);
     inMemoryUploadTokens.set(tokenHash, updatedRecord);
 
     // 2. Update L2 Local Disk Cache
@@ -422,12 +497,19 @@ export const db = {
     // 3. Update L3 Supabase Storage
     if (supabaseClient) {
       try {
+        const payload = JSON.stringify(updatedRecord);
         await supabaseClient.storage
           .from('smartform_tokens')
-          .upload(`tokens/${tokenHash}.json`, JSON.stringify(updatedRecord), {
+          .upload(`tokens/${tokenHash}.json`, payload, {
             contentType: 'application/json',
             upsert: true,
           });
+        await supabaseClient.storage
+          .from('smartform_tokens')
+          .upload(`tokens/${cleanToken}.json`, payload, {
+            contentType: 'application/json',
+            upsert: true,
+          }).catch(() => {});
       } catch (err) {
         console.warn('[Database] Error syncing consumed token to Supabase:', err);
       }
@@ -766,8 +848,17 @@ export async function createUnifiedUploadSession(
     });
   }
 
+  const activeUrl = params.formUrl || params.pastedUrl || params.inspectedUrl || '';
+  const nowIso = new Date().toISOString();
+  const expiresIso = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+
   // Register session-level upload token (valid for ALL documents in this session)
-  await db.registerUploadToken(secureToken, sessionId, 'ALL', 'ALL', 120);
+  await db.registerUploadToken(secureToken, sessionId, 'ALL', 'ALL', 120, {
+    workflowMode: params.workflowMode,
+    scope: 'SESSION_ALL_DOCS',
+    requiredDocuments: canonicalDocs,
+    formUrl: activeUrl,
+  });
 
   const initialMappings: FieldMapping[] = (params.fieldRequirements || []).map((fr, idx) => ({
     id: `map_${idx}`,
@@ -781,10 +872,6 @@ export async function createUnifiedUploadSession(
     status: fr.isManualEntry ? 'manual_required' : 'attention_required',
     isManualEntry: fr.isManualEntry,
   }));
-
-  const activeUrl = params.formUrl || params.pastedUrl || params.inspectedUrl || '';
-  const nowIso = new Date().toISOString();
-  const expiresIso = new Date(Date.now() + 120 * 60 * 1000).toISOString();
 
   const session: ApplicationSession = {
     id: sessionId,

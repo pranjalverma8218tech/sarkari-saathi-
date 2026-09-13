@@ -236,117 +236,189 @@ async function startServer() {
 
   // Public Mobile Upload Page Route - Authenticated strictly via secure single-use token (No login required)
   app.get('/upload', async (req, res) => {
-    const sessionId = (req.query.session as string) || '';
-    const uploadToken = (req.query.token as string) || '';
+    const rawSessionId = (req.query.session as string) || '';
+    const rawUploadToken = (req.query.token as string) || '';
     const rawDoc = (req.query.doc as string) || '';
+
+    const sessionId = decodeURIComponent(rawSessionId).trim();
+    let uploadToken = '';
+    try {
+      uploadToken = decodeURIComponent(rawUploadToken).trim().replace(/^['"]|['"]$/g, '');
+    } catch {
+      uploadToken = rawUploadToken.trim().replace(/^['"]|['"]$/g, '');
+    }
+
     let docName = 'Required Document';
     try {
-      docName = decodeURIComponent(rawDoc) || 'Required Document';
+      docName = decodeURIComponent(rawDoc).trim() || 'Required Document';
     } catch {
-      docName = rawDoc || 'Required Document';
+      docName = rawDoc.trim() || 'Required Document';
     }
     const isJson = req.headers.accept?.includes('application/json') || req.query.format === 'json';
 
-    // 1. Missing session or token
-    if (!sessionId || !uploadToken) {
+    // 1. Missing or malformed parameters (Requirement 2 & 6)
+    if (!sessionId || !uploadToken || uploadToken.length < 16) {
+      const diagnosticReason = 'MALFORMED_TOKEN';
+      console.warn('[MOBILE REQUEST DIAGNOSTIC - REJECTED]', JSON.stringify({
+        requestHostname: req.hostname,
+        requestProtocol: req.protocol,
+        requestPath: req.path,
+        sessionIdReceived: sessionId || 'MISSING',
+        tokenLength: uploadToken?.length || 0,
+        maskedToken: uploadToken ? `${uploadToken.slice(0, 4)}...${uploadToken.slice(-4)}` : 'none',
+        PUBLIC_APP_URL: process.env.PUBLIC_APP_URL || '',
+        tokenLookupResult: 'not_checked',
+        sessionLookupResult: 'not_checked',
+        tokenScope: 'none',
+        tokenWorkflowMode: 'none',
+        tokenExpiry: 'none',
+        tokenStatus: 'none',
+        sessionStatus: 'none',
+        requiredDocumentCount: 0,
+        exactReason: diagnosticReason,
+      }));
+
       if (isJson) {
-        return res.status(403).json({ error: 'Access Denied: Missing upload token or session identifier.' });
+        return res.status(403).json({ error: 'Malformed Upload Token', code: diagnosticReason, valid: false });
       }
-      return res.status(403).send(renderErrorHtml('Access Denied', 'Missing upload token or session identifier. Please scan a valid QR code.', 403));
+      return res.status(403).send(renderErrorHtml('Malformed Upload Token', 'The upload URL parameter format is invalid or missing.', 403, diagnosticReason));
     }
 
-    // 2. Validate token against persistent database records (READ-ONLY)
+    // 2. Compute hashes and compare
+    const receivedTokenHash = crypto.createHash('sha256').update(uploadToken.toLowerCase()).digest('hex');
+    const receivedTokenPrefix = receivedTokenHash.slice(0, 8);
+    const maskedToken = `${uploadToken.slice(0, 4)}...${uploadToken.slice(-4)}`;
+
+    // Authoritative lookup from single source of truth (Supabase Storage / DB)
     const tokenInfo = await db.getUploadToken(uploadToken);
 
-    // Diagnostic logging for mobile request & comparison (Requirements 2 & 3)
-    const receivedTokenHash = crypto.createHash('sha256').update(uploadToken).digest('hex');
-    const receivedTokenPrefix = receivedTokenHash.slice(0, 8);
-    const genRecord = recentQrGenerations.get(receivedTokenHash) || recentQrGenerations.get(sessionId + '_' + docName) || null;
-
-    console.log('[MOBILE REQUEST DIAGNOSTIC]', JSON.stringify({
-      receivedSessionId: sessionId,
-      receivedTokenLength: uploadToken.length,
-      receivedTokenHashPrefix: `${receivedTokenPrefix}...`,
-      receivedDocValue: rawDoc,
-      decodedDocValue: docName,
-      requestHostname: req.hostname,
-      requestPath: req.path,
-      urlDecodingChangedToken: false,
-      tokenLookupResult: tokenInfo ? 'found' : 'not_found',
-      sessionLookupResult: tokenInfo ? (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId ? 'match' : 'mismatch') : 'unverified',
-      documentRequirementLookupResult: tokenInfo ? tokenInfo.requirementId : 'not_found',
-      expirationCheckResult: tokenInfo ? (tokenInfo.expired ? 'expired' : 'valid') : 'not_found',
-      consumedStatus: tokenInfo ? (tokenInfo.consumed ? 'consumed' : 'unconsumed') : 'not_found',
-      storageTier: tokenInfo?.storageTier || 'none',
-    }));
-
-    const genHash = genRecord ? genRecord.tokenHash : (tokenInfo ? tokenInfo.tokenHash : 'NOT_FOUND_IN_LOG');
-    const hashMatch = genHash !== 'NOT_FOUND_IN_LOG' && genHash === receivedTokenHash;
-    const genSession = genRecord ? genRecord.sessionId : (tokenInfo ? tokenInfo.sessionId : 'NOT_FOUND_IN_LOG');
-    const sessionMatch = genSession !== 'NOT_FOUND_IN_LOG' && genSession === sessionId;
-    const genDoc = genRecord ? genRecord.docType : (tokenInfo ? tokenInfo.expectedDocumentType : 'NOT_FOUND_IN_LOG');
-    const docMatch = genDoc !== 'NOT_FOUND_IN_LOG' && (genDoc === docName || decodeURIComponent(genDoc) === docName);
-
-    console.log(`[DIAGNOSTIC COMPARISON]
-TOKEN_GENERATED_HASH = ${genHash}
-TOKEN_RECEIVED_HASH = ${receivedTokenHash}
-HASH_MATCH = ${hashMatch ? 'TRUE' : 'FALSE'}
-SESSION_GENERATED = ${genSession}
-SESSION_RECEIVED = ${sessionId}
-SESSION_MATCH = ${sessionMatch ? 'TRUE' : 'FALSE'}
-DOC_GENERATED = ${genDoc}
-DOC_RECEIVED = ${docName}
-DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
+    // 3. Structured diagnostic reason determination (Requirement 2)
+    let diagnosticReason: string | null = null;
+    let failureStatus = 403;
+    let failureTitle = 'Invalid Upload Token';
+    let failureMsg = 'The provided upload token is unknown or unauthorized.';
 
     if (!tokenInfo) {
-      if (isJson) {
-        return res.status(403).json({ error: 'Invalid Upload Token: The provided upload token is unknown or unauthorized.' });
-      }
-      return res.status(403).send(renderErrorHtml('Invalid Upload Token', 'The provided QR code upload token is unknown or unauthorized. Please ask the operator for a new QR code.', 403));
+      diagnosticReason = 'TOKEN_NOT_FOUND';
+      failureTitle = 'Invalid Upload Token';
+      failureMsg = 'The provided QR code upload token was not found in the database.';
+    } else if (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId) {
+      diagnosticReason = 'TOKEN_SESSION_MISMATCH';
+      failureTitle = 'Session Mismatch';
+      failureMsg = 'The upload token does not match this application session.';
+    } else if (tokenInfo.consumed || tokenInfo.status === 'consumed' || Boolean(tokenInfo.consumedAt)) {
+      diagnosticReason = 'TOKEN_CLOSED';
+      failureStatus = 410;
+      failureTitle = 'Token Already Used';
+      failureMsg = 'This upload link has already been used and closed.';
+    } else if (tokenInfo.expired || Date.now() > tokenInfo.expiresAt || tokenInfo.status === 'expired') {
+      diagnosticReason = 'TOKEN_EXPIRED';
+      failureStatus = 410;
+      failureTitle = 'QR Code Expired';
+      failureMsg = 'This upload session has expired. Please ask the operator for a new QR code.';
+    } else if (tokenInfo.scope !== 'SESSION_ALL_DOCS' && tokenInfo.scope !== 'SINGLE_DOC') {
+      diagnosticReason = 'TOKEN_SCOPE_INVALID';
+      failureTitle = 'Invalid Token Scope';
+      failureMsg = 'The token scope is invalid or unsupported.';
+    } else if (docName !== 'Required Document' && docName !== 'ALL' && tokenInfo.scope === 'SINGLE_DOC' && tokenInfo.expectedDocumentType !== 'ALL' && tokenInfo.expectedDocumentType !== docName) {
+      diagnosticReason = 'DOCUMENT_PERMISSION_INVALID';
+      failureTitle = 'Document Permission Denied';
+      failureMsg = `This token is only authorized for ${tokenInfo.expectedDocumentType}, not ${docName}.`;
     }
 
-    // 3. Verify session match
-    if (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId) {
-      if (isJson) {
-        return res.status(403).json({ error: 'Token Mismatch: Upload token does not match this application session.' });
-      }
-      return res.status(403).send(renderErrorHtml('Token Mismatch', 'The upload token does not match this application session.', 403));
-    }
+    // Comprehensive mobile diagnostic logging (Requirement 2)
+    console.log('[MOBILE REQUEST DIAGNOSTIC]', JSON.stringify({
+      requestHostname: req.hostname,
+      requestProtocol: req.protocol,
+      requestPath: req.path,
+      sessionIdReceived: sessionId,
+      tokenLength: uploadToken.length,
+      maskedToken,
+      PUBLIC_APP_URL: process.env.PUBLIC_APP_URL || '',
+      tokenLookupResult: tokenInfo ? 'found' : 'not_found',
+      sessionLookupResult: tokenInfo ? (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId ? 'match' : 'mismatch') : 'not_found',
+      tokenScope: tokenInfo?.scope || 'unknown',
+      tokenWorkflowMode: tokenInfo?.workflowMode || 'unknown',
+      tokenExpiry: tokenInfo ? new Date(tokenInfo.expiresAt).toISOString() : 'unknown',
+      tokenStatus: tokenInfo?.status || 'unknown',
+      sessionStatus: tokenInfo ? 'active' : 'unknown',
+      requiredDocumentCount: tokenInfo?.requiredDocuments?.length || 0,
+      storageTier: tokenInfo?.storageTier || 'none',
+      exactReason: diagnosticReason || 'VALID_TOKEN_SUCCESS',
+    }));
 
-    // 4. Verify expiration or already consumed
-    if (tokenInfo.expired || tokenInfo.consumed) {
-      const msg = tokenInfo.consumed
-        ? 'Upload link expired or already used. Please generate a new QR code.'
-        : 'This upload session has expired. Please ask the cyber café operator for a new QR code.';
+    // Diagnostic comparison log (Requirement 5)
+    console.log(`[DIAGNOSTIC COMPARISON]
+TOKEN_RECEIVED_HASH = ${receivedTokenHash}
+TOKEN_LOOKUP = ${tokenInfo ? 'SUCCESS' : 'NOT_FOUND'}
+SESSION_MATCH = ${tokenInfo && (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId) ? 'SUCCESS' : 'MISMATCH'}
+TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'SUCCESS' : 'MISMATCH'}`);
+
+    if (diagnosticReason) {
       if (isJson) {
-        return res.status(410).json({ error: msg });
+        return res.status(failureStatus).json({
+          error: failureTitle,
+          code: diagnosticReason,
+          message: failureMsg,
+          valid: false,
+        });
       }
-      return res.status(410).send(renderErrorHtml('QR Code Expired / Used', msg, 410));
+      return res.status(failureStatus).send(renderErrorHtml(failureTitle, failureMsg, failureStatus, diagnosticReason));
     }
 
     // 5. Valid unexpired token -> HTTP 200 OK (Strictly read-only; does NOT consume token)
     let session = await db.getSession(sessionId);
     if (!session || !session.documentRequirements || session.documentRequirements.length === 0) {
-      const fallbackUnified = await db.createUnifiedUploadSession({
-        applicationId: sessionId || tokenInfo.applicationId || tokenInfo.sessionId,
-        workflowMode: 'URL_PASTE',
-        baseUrl: getBaseUrl(req),
-      });
-      session = fallbackUnified.session;
+      if (tokenInfo!.requiredDocuments && tokenInfo!.requiredDocuments.length > 0) {
+        const nowIso = new Date().toISOString();
+        const expiresIso = new Date(tokenInfo!.expiresAt).toISOString();
+        session = {
+          id: sessionId,
+          workflowMode: tokenInfo!.workflowMode || 'URL_PASTE',
+          url: tokenInfo!.formUrl || '',
+          pastedUrl: tokenInfo!.formUrl || '',
+          inspectedUrl: '',
+          pageTitle: 'Government Application',
+          formActionUrl: '',
+          inspectedAt: nowIso,
+          inspectionState: 'active_inspected',
+          status: 'waiting_documents',
+          detectedFields: [],
+          requirements: [],
+          documentRequirements: tokenInfo!.requiredDocuments,
+          sessionUploadToken: uploadToken,
+          sessionQrDataUrl: '',
+          sessionUploadUrl: `${getBaseUrl(req)}/upload?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(uploadToken)}`,
+          extractedData: [],
+          mappings: [],
+          unfilledRequiredFields: [],
+          createdAt: tokenInfo!.createdAt,
+          expiresAt: expiresIso,
+          storagePurged: false,
+        };
+        await db.saveSession(session);
+      } else {
+        const fallbackUnified = await db.createUnifiedUploadSession({
+          applicationId: sessionId || tokenInfo!.applicationId || tokenInfo!.sessionId,
+          workflowMode: tokenInfo!.workflowMode || 'URL_PASTE',
+          baseUrl: getBaseUrl(req),
+        });
+        session = fallbackUnified.session;
+      }
     }
 
     if (isJson) {
       return res.status(200).json({
         valid: true,
-        sessionId: tokenInfo.sessionId,
-        expectedType: tokenInfo.expectedDocumentType,
+        sessionId: tokenInfo!.sessionId,
+        expectedType: tokenInfo!.expectedDocumentType,
         documentRequirements: session?.documentRequirements || [],
-        expiresAt: tokenInfo.expiresAt,
-        status: tokenInfo.status,
+        expiresAt: tokenInfo!.expiresAt,
+        status: tokenInfo!.status,
       });
     }
 
-    return res.status(200).send(renderMobileUploadHtml(session, uploadToken, tokenInfo.expiresAt));
+    return res.status(200).send(renderMobileUploadHtml(session, uploadToken, tokenInfo!.expiresAt));
   });
 
   // Token validation endpoint for automated verification
@@ -373,6 +445,47 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
       expectedType: tokenInfo.expectedDocumentType,
       expiresAt: tokenInfo.expiresAt,
       status: tokenInfo.status,
+    });
+  });
+
+  // Safe Diagnostic Endpoint for Upload Session Inspection (Requirement 9)
+  app.get('/api/debug/upload-session', async (req, res) => {
+    const rawSession = (req.query.session as string) || (req.query.sessionId as string) || '';
+    const sessionId = decodeURIComponent(rawSession).trim();
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID parameter is required (?session=<id>)' });
+    }
+
+    const session = await db.getSession(sessionId);
+    let tokenInfo: any = null;
+
+    if (session?.sessionUploadToken) {
+      tokenInfo = await db.getUploadToken(session.sessionUploadToken);
+    }
+
+    const sessionExists = Boolean(session);
+    const tokenExists = Boolean(tokenInfo);
+    const tokenSessionMatches = Boolean(
+      tokenInfo && (tokenInfo.sessionId === sessionId || tokenInfo.applicationId === sessionId)
+    );
+    const status = tokenInfo?.status || session?.status || (sessionExists ? 'active' : 'not_found');
+    const expired = tokenInfo ? (Date.now() > tokenInfo.expiresAt || tokenInfo.status === 'expired') : false;
+    const scope = tokenInfo?.scope || (session ? 'SESSION_ALL_DOCS' : 'NONE');
+    const workflowMode = tokenInfo?.workflowMode || session?.workflowMode || 'URL_PASTE';
+    const requiredDocumentCount = session?.documentRequirements?.length || tokenInfo?.requiredDocuments?.length || 0;
+
+    // NEVER return the raw token - safe metadata only (Requirement 9)
+    return res.json({
+      sessionExists,
+      tokenExists,
+      tokenSessionMatches,
+      status,
+      expired,
+      scope,
+      workflowMode,
+      requiredDocumentCount,
+      storageTier: tokenInfo?.storageTier || (tokenExists ? 'L3_supabase_storage' : 'none'),
     });
   });
 
@@ -497,6 +610,7 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         formUrl,
         pastedUrl,
         inspectedUrl,
+        url,
         workflowMode,
         pageTitle,
         formActionUrl,
@@ -507,11 +621,12 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         timestamp,
       } = req.body;
 
-      if (!formUrl && !pastedUrl && !inspectedUrl) {
+      const effectiveUrl = formUrl || pastedUrl || inspectedUrl || url;
+      if (!effectiveUrl) {
         return res.status(400).json({ error: 'Government form URL is required.' });
       }
 
-      const activeUrl = (formUrl || pastedUrl || inspectedUrl || '').trim();
+      const activeUrl = String(effectiveUrl).trim();
       const resolvedMode = (workflowMode === 'EXTENSION_INSPECTION' || (!workflowMode && typeof targetTabId === 'number' && inspectedUrl))
         ? 'EXTENSION_INSPECTION'
         : 'URL_PASTE';
@@ -546,8 +661,12 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         baseUrl,
       });
 
-      // Diagnostic logging for single session QR generation
-      const sessionTokenHash = crypto.createHash('sha256').update(unified.secureToken).digest('hex');
+      // Diagnostic logging for single session QR generation & URL verification (Requirements 1 & 5)
+      const sessionTokenHash = crypto.createHash('sha256').update(unified.secureToken.toLowerCase()).digest('hex');
+      const qrParsed = new URL(unified.qrUrl);
+      const maskedToken = `${unified.secureToken.slice(0, 4)}...${unified.secureToken.slice(-4)}`;
+      const maskedQrUrl = `${qrParsed.origin}${qrParsed.pathname}?session=${encodeURIComponent(unified.sessionId)}&token=${maskedToken}`;
+
       const genRecord: SafeQrGenerationRecord = {
         sessionId: unified.sessionId,
         documentRequirementId: 'ALL',
@@ -560,12 +679,31 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         storageLocation: db.isSupabaseConfigured()
           ? 'Supabase Storage (smartform_tokens) + Local Cache'
           : 'Local Server Storage',
-        generatedQrUrl: unified.qrUrl,
+        generatedQrUrl: maskedQrUrl,
         resolvedPublicAppUrl: baseUrl,
       };
       recentQrGenerations.set(sessionTokenHash, genRecord);
       recentQrGenerations.set(unified.sessionId + '_ALL', genRecord);
 
+      console.log('[EXACT QR URL DIAGNOSTIC]', JSON.stringify({
+        protocol: qrParsed.protocol,
+        hostname: qrParsed.hostname,
+        pathname: qrParsed.pathname,
+        sessionParam: qrParsed.searchParams.get('session'),
+        tokenParamMasked: maskedToken,
+        tokenLength: unified.secureToken.length,
+        tokenIsPureHex: /^[a-f0-9]{32}$/i.test(unified.secureToken),
+        specialCharactersPresent: /[^a-f0-9]/i.test(unified.secureToken),
+        urlEncodingValid: !unified.qrUrl.includes(' '),
+        containsLocalhost: qrParsed.hostname.includes('localhost') || qrParsed.hostname.includes('127.0.0.1'),
+        containsPreviewUrl: qrParsed.hostname.includes('ais-dev') || qrParsed.hostname.includes('aistudio.google.com'),
+        containsRunApp: qrParsed.hostname.includes('run.app'),
+        isCanonicalDomain: qrParsed.hostname === 'sarkari-saathi.ai.studio',
+        finalMaskedQrUrl: maskedQrUrl,
+        storageDatastore: db.isSupabaseConfigured() ? 'Supabase Storage (smartform_tokens)' : 'Local Disk / Memory',
+      }));
+
+      console.log(`[TOKEN GENERATION HASH] = ${sessionTokenHash}`);
       console.log('[SINGLE QR GENERATION DIAGNOSTIC]', JSON.stringify(genRecord));
 
       res.json({
@@ -685,8 +823,8 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
     }
   });
 
-  // 2. Get Application Session Status
-  app.get('/api/sessions/:id', async (req, res) => {
+  // 2. Get Application Session Status (Accessible via both /api/sessions/:id and /api/forms/session/:id)
+  const handleGetSession = async (req: express.Request, res: express.Response) => {
     try {
       const sessionId = req.params.id;
       const session = await db.getSession(sessionId);
@@ -698,7 +836,10 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
+
+  app.get('/api/sessions/:id', handleGetSession);
+  app.get('/api/forms/session/:id', handleGetSession);
 
   // 3. Customer Mobile Upload Endpoint: Real Document Upload & AI Verification
   app.post('/api/documents/upload', upload.single('file') as any, async (req, res) => {
@@ -864,6 +1005,10 @@ DOC_MATCH = ${docMatch ? 'TRUE' : 'FALSE'}`);
         .map((m) => m.targetField);
 
       await db.saveSession(session);
+
+      if (allVerified) {
+        await db.consumeUploadToken(uploadToken, true);
+      }
 
       res.json({
         success: true,

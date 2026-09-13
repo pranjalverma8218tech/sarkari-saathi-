@@ -7,13 +7,13 @@
 
 import { ApplicationSession, DocumentRequirement } from '../types.js';
 
-export function renderErrorHtml(title: string, message: string, statusCode: number): string {
+export function renderErrorHtml(title: string, message: string, statusCode: number, diagnosticCode?: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${statusCode} - ${title}</title>
+  <title>${statusCode} - ${title}${diagnosticCode ? ` (${diagnosticCode})` : ''}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
     body { background: #f8fafc; color: #0f172a; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -24,6 +24,7 @@ export function renderErrorHtml(title: string, message: string, statusCode: numb
     h1 { font-size: 20px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
     p { font-size: 14px; color: #475569; line-height: 1.5; margin-bottom: 24px; }
     .badge { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 4px 10px; border-radius: 9999px; background: #f1f5f9; color: #64748b; }
+    .code-box { display: inline-block; margin-top: 8px; font-family: monospace; font-size: 12px; color: #dc2626; background: #fef2f2; padding: 4px 8px; border-radius: 6px; border: 1px solid #fecaca; }
     .footer { margin-top: 24px; font-size: 12px; color: #94a3b8; }
   </style>
 </head>
@@ -33,6 +34,7 @@ export function renderErrorHtml(title: string, message: string, statusCode: numb
       ${statusCode === 410 ? '&#9203;' : '&#9888;'}
     </div>
     <span class="badge">HTTP ${statusCode} ${statusCode === 410 ? 'Expired' : 'Forbidden'}</span>
+    ${diagnosticCode ? `<div class="code-box">${escapeHtml(diagnosticCode)}</div>` : ''}
     <h1 style="margin-top: 12px;">${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
     <div class="footer">SmartForm AI &bull; Cyber Café Document Assistant</div>

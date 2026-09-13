@@ -54,6 +54,18 @@ export const DocumentsScreen: React.FC<DocumentsScreenProps> = ({
   const singleQrDataUrl = sessionQrDataUrl || documentRequirements[0]?.qrDataUrl || '';
   const singleUploadUrl = sessionUploadUrl || documentRequirements[0]?.uploadUrl || '';
 
+  const urlObj = React.useMemo(() => {
+    if (!singleUploadUrl) return null;
+    try {
+      return new URL(singleUploadUrl);
+    } catch {
+      return null;
+    }
+  }, [singleUploadUrl]);
+
+  const parsedToken = urlObj?.searchParams.get('token') || '';
+  const maskedToken = parsedToken ? `${parsedToken.slice(0, 4)}...${parsedToken.slice(-4)}` : 'N/A';
+
   const handleCopyLink = () => {
     if (singleUploadUrl) {
       navigator.clipboard.writeText(singleUploadUrl);
@@ -152,6 +164,32 @@ export const DocumentsScreen: React.FC<DocumentsScreenProps> = ({
                 </>
               )}
             </div>
+
+            {/* Diagnostic Trace Panel (Requirement 7) */}
+            {singleUploadUrl && (
+              <div className="mt-4 w-full max-w-xs p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-left text-xs space-y-1">
+                <div className="flex items-center justify-between font-bold text-slate-700 text-[11px]">
+                  <span>QR Session Metadata</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold uppercase">Authoritative</span>
+                </div>
+                <div className="text-[11px] text-slate-600 truncate">
+                  <span className="font-semibold text-slate-800">Session ID:</span>{' '}
+                  <code className="text-blue-700">{urlObj?.searchParams.get('session') || documentRequirements[0]?.applicationId || 'N/A'}</code>
+                </div>
+                <div className="text-[11px] text-slate-600 truncate">
+                  <span className="font-semibold text-slate-800">Masked Token:</span>{' '}
+                  <code className="text-emerald-700">{maskedToken}</code>
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  <span className="font-semibold text-slate-800">Datastore:</span>{' '}
+                  <span className="text-slate-700">Supabase Storage</span>
+                </div>
+                <div className="text-[11px] text-slate-600">
+                  <span className="font-semibold text-slate-800">Scope:</span>{' '}
+                  <span className="text-slate-700">SESSION_ALL_DOCS</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Metrics & Instructions */}

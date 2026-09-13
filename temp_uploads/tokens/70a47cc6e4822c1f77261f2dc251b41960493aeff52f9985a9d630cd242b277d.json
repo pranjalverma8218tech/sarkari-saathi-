@@ -1,0 +1,15 @@
+{
+  "tokenHash": "70a47cc6e4822c1f77261f2dc251b41960493aeff52f9985a9d630cd242b277d",
+  "rawToken": "tok_026eh7yrzdj9u4jsoogtwb",
+  "sessionId": "app_probe_1789315062253",
+  "applicationId": "app_probe_1789315062253",
+  "workflowMode": "URL_PASTE",
+  "scope": "SESSION_ALL_DOCS",
+  "formUrl": "",
+  "requirementId": "ALL",
+  "expectedDocumentType": "ALL",
+  "createdAt": "2026-09-13T15:57:42.253Z",
+  "expiresAt": 1789322262253,
+  "consumedAt": null,
+  "status": "active"
+}
