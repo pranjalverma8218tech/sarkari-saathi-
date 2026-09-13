@@ -1,0 +1,135 @@
+{
+  "id": "app_a44c570d",
+  "workflowMode": "URL_PASTE",
+  "url": "https://ssc.nic.in/portal/apply",
+  "pastedUrl": "https://ssc.nic.in/portal/apply",
+  "pageTitle": "",
+  "formActionUrl": "",
+  "inspectedAt": "2026-09-13T13:26:31.178Z",
+  "inspectionState": "active_inspected",
+  "targetOrigin": "https://ssc.nic.in",
+  "status": "waiting_documents",
+  "detectedFields": [
+    {
+      "id": "name",
+      "name": "candidate_name",
+      "label": "Candidate Full Name",
+      "type": "text",
+      "required": true
+    },
+    {
+      "id": "dob",
+      "name": "dob",
+      "label": "Date of Birth",
+      "type": "date",
+      "required": true
+    },
+    {
+      "id": "aadhaar",
+      "name": "aadhaar_no",
+      "label": "Aadhaar Number",
+      "type": "text",
+      "required": true
+    }
+  ],
+  "requirements": [
+    {
+      "fieldKey": "candidate_name",
+      "targetFieldIdOrName": "candidate_name",
+      "label": "Candidate Full Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "sourceDocumentType": "10th Marksheet",
+      "isManualEntry": false,
+      "notes": "Obtain from 10th Marksheet"
+    },
+    {
+      "fieldKey": "dob",
+      "targetFieldIdOrName": "dob",
+      "label": "Date of Birth",
+      "required": true,
+      "obtainableFromDocument": true,
+      "sourceDocumentType": "Manual Entry",
+      "isManualEntry": false,
+      "notes": "Obtain from Manual Entry"
+    },
+    {
+      "fieldKey": "aadhaar_no",
+      "targetFieldIdOrName": "aadhaar_no",
+      "label": "Aadhaar Number",
+      "required": true,
+      "obtainableFromDocument": true,
+      "sourceDocumentType": "Identity Proof",
+      "isManualEntry": false,
+      "notes": "Obtain from Identity Proof"
+    }
+  ],
+  "documentRequirements": [
+    {
+      "id": "req_c78acf30",
+      "applicationId": "app_a44c570d",
+      "documentType": "10th Marksheet",
+      "uploadToken": "966be6cea908b840911a602f9afc7149",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_a44c570d&token=966be6cea908b840911a602f9afc7149",
+      "status": "rejected",
+      "rejectionReason": "Uploaded document does not match \"10th Marksheet\". Please upload a clear original copy.",
+      "detectedType": "Mismatched Document"
+    },
+    {
+      "id": "req_0a6f7d7e",
+      "applicationId": "app_a44c570d",
+      "documentType": "Identity Proof",
+      "uploadToken": "966be6cea908b840911a602f9afc7149",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_a44c570d&token=966be6cea908b840911a602f9afc7149",
+      "status": "pending"
+    }
+  ],
+  "sessionUploadToken": "966be6cea908b840911a602f9afc7149",
+  "sessionUploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_a44c570d&token=966be6cea908b840911a602f9afc7149",
+  "sessionQrDataUrl": "data:image/png;base64,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",
+  "extractedData": [],
+  "mappings": [
+    {
+      "id": "map_0",
+      "source": "10th Marksheet",
+      "extractedValue": "",
+      "targetField": "Candidate Full Name",
+      "targetSelector": "#candidate_name",
+      "targetId": "candidate_name",
+      "targetName": "candidate_name",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_1",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Date of Birth",
+      "targetSelector": "#dob",
+      "targetId": "dob",
+      "targetName": "dob",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_2",
+      "source": "Identity Proof",
+      "extractedValue": "",
+      "targetField": "Aadhaar Number",
+      "targetSelector": "#aadhaar_no",
+      "targetId": "aadhaar_no",
+      "targetName": "aadhaar_no",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    }
+  ],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-13T13:26:31.179Z",
+  "expiresAt": "2026-09-13T15:26:31.179Z",
+  "storagePurged": false
+}

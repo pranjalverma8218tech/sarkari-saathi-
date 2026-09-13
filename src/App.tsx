@@ -196,6 +196,9 @@ export default function App() {
         targetTabId: sessionTabId,
         targetWindowId: sessionWinId,
         targetOrigin: sessionOrigin,
+        sessionUploadToken: data.sessionUploadToken,
+        sessionUploadUrl: data.sessionUploadUrl,
+        sessionQrDataUrl: data.sessionQrDataUrl,
         status: 'waiting_documents',
         detectedFields: data.detectedFields || [],
         requirements: data.requirements || [],
@@ -237,6 +240,34 @@ export default function App() {
       console.error(e);
     } finally {
       setIsPolling(false);
+    }
+  };
+
+  // Step 3 Desktop fallback upload for operator
+  const handleManualOperatorUpload = async (reqId: string, docType: string, file: File) => {
+    if (!session?.id) return;
+    try {
+      const formData = new FormData();
+      formData.append('session', session.id);
+      formData.append(
+        'token',
+        session.sessionUploadToken || session.documentRequirements.find((d) => d.id === reqId)?.uploadToken || ''
+      );
+      formData.append('requirementId', reqId);
+      formData.append('docType', docType);
+      formData.append('file', file);
+
+      const res = await fetch('/api/documents/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.message || data.error || 'Upload failed');
+      }
+      await handleRefreshSession();
+    } catch (err: any) {
+      alert('Upload failed: ' + (err.message || 'Please retry.'));
     }
   };
 
@@ -381,14 +412,17 @@ export default function App() {
           />
         )}
 
-        {/* Screen 3: Documents Upload with Dedicated Single-Purpose QRs */}
+        {/* Screen 3: Documents Upload with SINGLE QR Code + Multi-Document System */}
         {currentStep === 3 && session && (
           <DocumentsScreen
-            formTitle={session.detectedFields?.[0]?.label ? 'Public Application Portal' : 'Government Form'}
+            formTitle={session.pageTitle || (session.detectedFields?.[0]?.label ? 'Public Application Portal' : 'Government Form')}
             documentRequirements={session.documentRequirements}
+            sessionQrDataUrl={session.sessionQrDataUrl}
+            sessionUploadUrl={session.sessionUploadUrl}
             onProceedToAutoFill={handleProceedToAutoFill}
             onRefreshSession={handleRefreshSession}
             isPolling={isPolling}
+            onManualUpload={handleManualOperatorUpload}
           />
         )}
 

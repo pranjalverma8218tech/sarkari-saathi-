@@ -7,15 +7,20 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import QRCode from 'qrcode';
 import {
+  AnalyzedRequirement,
   ApplicationSession,
+  CanonicalDocumentRequirement,
   DetectedField,
   DocumentRequirement,
   ExtractedField,
   FieldMapping,
   LearningFeedbackEvent,
+  UploadSession,
   UploadTokenRecord,
   ValidatedTokenInfo,
+  WorkflowMode,
 } from '../types.js';
 
 // Local temporary storage folder for documents if Supabase Storage is not yet configured
@@ -50,6 +55,20 @@ const storedFiles = new Map<
   }
 >();
 const feedbackRecords: LearningFeedbackEvent[] = [];
+const FEEDBACK_STORAGE_FILE = path.join(LOCAL_STORAGE_DIR, 'learning_feedback.json');
+
+// Initialize local persistent learning feedback
+try {
+  if (fs.existsSync(FEEDBACK_STORAGE_FILE)) {
+    const rawFb = fs.readFileSync(FEEDBACK_STORAGE_FILE, 'utf8');
+    const parsedFb = JSON.parse(rawFb);
+    if (Array.isArray(parsedFb)) {
+      feedbackRecords.push(...parsedFb);
+    }
+  }
+} catch (fbErr) {
+  console.warn('[Database] Notice initializing learning feedback from disk:', fbErr);
+}
 
 // Initialize Supabase Client if credentials exist
 let supabaseClient: SupabaseClient | null = null;
@@ -106,28 +125,31 @@ if (rawSupabaseUrl && supabaseKey) {
   console.log('[Database] Supabase credentials not found in env, using secured server-side transactional storage.');
 }
 
-// Active canonical public URL configured at runtime or via environment
-const CANONICAL_APP_URL = 'https://sarkari-saathi.ai.studio';
-let activePublicUrl: string = (process.env.PUBLIC_APP_URL || CANONICAL_APP_URL).trim().replace(/\/$/, '');
+// Runtime-configured public URL
+let configuredCustomPublicUrl: string | null = null;
+if (process.env.PUBLIC_APP_URL && process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL') {
+  configuredCustomPublicUrl = process.env.PUBLIC_APP_URL.trim().replace(/\/$/, '');
+}
 
 export const db = {
   isSupabaseConfigured(): boolean {
     return supabaseClient !== null;
   },
 
+  getCustomPublicUrl(): string | null {
+    return configuredCustomPublicUrl;
+  },
+
   getPublicUrl(): string {
-    if (!activePublicUrl || activePublicUrl.includes('localhost') || activePublicUrl.includes('127.0.0.1') || activePublicUrl.includes('ais-dev-')) {
-      return CANONICAL_APP_URL;
-    }
-    return activePublicUrl;
+    return configuredCustomPublicUrl || '';
   },
 
   setPublicUrl(url: string): void {
     const cleaned = (url || '').trim().replace(/\/$/, '');
-    if (!cleaned || cleaned.includes('localhost') || cleaned.includes('127.0.0.1') || cleaned.includes('ais-dev-')) {
-      activePublicUrl = CANONICAL_APP_URL;
+    if (!cleaned) {
+      configuredCustomPublicUrl = null;
     } else {
-      activePublicUrl = cleaned;
+      configuredCustomPublicUrl = cleaned;
     }
   },
 
@@ -349,7 +371,8 @@ export const db = {
   },
 
   // Atomically consume token. Only succeeds if currently active and unconsumed.
-  async consumeUploadToken(token: string): Promise<{ success: boolean; reason?: string }> {
+  // Note: For session-level tokens (requirementId === 'ALL'), the token is preserved until force=true
+  async consumeUploadToken(token: string, force = false): Promise<{ success: boolean; reason?: string; isSessionToken?: boolean }> {
     if (!token || typeof token !== 'string') return { success: false, reason: 'missing_token' };
     const tokenHash = hashToken(token);
 
@@ -363,6 +386,11 @@ export const db = {
     }
     if (current.expired || current.status === 'expired') {
       return { success: false, reason: 'expired' };
+    }
+
+    // If it's a multi-document session token and force is not requested, keep active for remaining documents
+    if (current.requirementId === 'ALL' && !force) {
+      return { success: true, isSessionToken: true };
     }
 
     const consumedAt = new Date().toISOString();
@@ -406,6 +434,39 @@ export const db = {
     }
 
     return { success: true };
+  },
+
+  async getUploadSessionSummary(sessionId: string): Promise<any | null> {
+    const session = await this.getSession(sessionId);
+    if (!session) return null;
+    const reqs = session.documentRequirements || [];
+    const uploaded = reqs.filter((r) => r.status === 'uploaded' || r.status === 'verified' || r.status === 'processing');
+    const processing = reqs.filter((r) => r.status === 'processing' || r.status === 'uploading');
+    const completed = reqs.filter((r) => r.status === 'verified');
+    const rejected = reqs.filter((r) => r.status === 'rejected');
+    const failed = reqs.filter((r) => r.status === 'failed');
+    const totalRequired = reqs.length;
+    const totalVerified = completed.length;
+    const isAllVerified = totalRequired > 0 && totalVerified === totalRequired;
+
+    return {
+      sessionId: session.id,
+      token: session.sessionUploadToken || '',
+      requiredDocuments: reqs,
+      uploadedDocuments: uploaded,
+      processingDocuments: processing,
+      completedDocuments: completed,
+      rejectedDocuments: rejected,
+      failedDocuments: failed,
+      overallStatus: isAllVerified
+        ? 'ready_for_review'
+        : processing.length > 0
+        ? 'processing'
+        : 'waiting_documents',
+      totalRequired,
+      totalVerified,
+      isAllVerified,
+    };
   },
 
   // Save uploaded file to private storage
@@ -526,24 +587,260 @@ export const db = {
     };
   },
 
-  // Save learning feedback for field mapping refinement
+  // Save learning feedback for field mapping & document classification refinement
   saveFeedback(event: LearningFeedbackEvent): void {
-    feedbackRecords.push(event);
+    const enriched: LearningFeedbackEvent = {
+      ...event,
+      id: event.id || 'fb_' + crypto.randomUUID().slice(0, 8),
+      createdAt: event.createdAt || new Date().toISOString(),
+      verified: event.verified ?? true,
+      wasCorrected: event.wasCorrected ?? true,
+    };
+    feedbackRecords.push(enriched);
+
+    // Persist to local disk
+    try {
+      fs.writeFileSync(FEEDBACK_STORAGE_FILE, JSON.stringify(feedbackRecords, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[Database] Local learning feedback disk write warning:', err);
+    }
+
+    // Persist to Supabase if configured
     if (supabaseClient) {
-      supabaseClient.from('learning_feedback').insert({
-        form_domain: event.formDomain,
-        field_label: event.fieldLabel,
-        field_name: event.fieldName,
-        ai_predicted_mapping: event.aiPredictedMapping,
-        operator_confirmed_mapping: event.operatorConfirmedMapping,
-        was_corrected: event.wasCorrected,
-      }).then(({ error }) => {
-        if (error) console.warn('[Feedback] Supabase insert error:', error.message);
-      });
+      supabaseClient
+        .from('learning_feedback')
+        .insert({
+          id: enriched.id,
+          form_domain: enriched.formDomain,
+          field_label: enriched.fieldLabel,
+          field_name: enriched.fieldName,
+          ai_predicted_mapping: enriched.aiPredictedMapping || enriched.previousMapping,
+          operator_confirmed_mapping: enriched.operatorConfirmedMapping || enriched.correctedMapping || '',
+          was_corrected: enriched.wasCorrected,
+        })
+        .then(({ error }) => {
+          if (error) console.warn('[Feedback] Supabase insert warning:', error.message);
+        });
     }
   },
 
   getRelevantFeedback(formDomain: string): LearningFeedbackEvent[] {
-    return feedbackRecords.filter((f) => f.formDomain === formDomain || !f.formDomain);
+    if (!formDomain) return [...feedbackRecords];
+    const cleanDomain = formDomain.toLowerCase().replace(/^www\./, '');
+    return feedbackRecords.filter((f) => {
+      if (!f.formDomain) return true;
+      const fDomain = f.formDomain.toLowerCase().replace(/^www\./, '');
+      return cleanDomain.includes(fDomain) || fDomain.includes(cleanDomain);
+    });
+  },
+
+  createUnifiedUploadSession(params: CreateUnifiedSessionParams): Promise<UnifiedUploadSessionResult> {
+    return createUnifiedUploadSession(params);
   },
 };
+
+function inferDocCategory(name: string): string {
+  const l = name.toLowerCase();
+  if (
+    l.includes('aadhaar') ||
+    l.includes('identity') ||
+    l.includes('pan') ||
+    l.includes('voter') ||
+    (l.includes('passport') && !l.includes('photo'))
+  ) {
+    return 'identity_document';
+  }
+  if (
+    l.includes('marksheet') ||
+    l.includes('10th') ||
+    l.includes('12th') ||
+    l.includes('graduation') ||
+    l.includes('degree') ||
+    l.includes('matric') ||
+    l.includes('intermediate')
+  ) {
+    return 'education_document';
+  }
+  if (l.includes('photo') || l.includes('picture')) return 'photo';
+  if (l.includes('sign')) return 'signature';
+  if (
+    l.includes('certificate') ||
+    l.includes('caste') ||
+    l.includes('income') ||
+    l.includes('domicile') ||
+    l.includes('ews')
+  ) {
+    return 'certificate';
+  }
+  return 'other';
+}
+
+export interface CreateUnifiedSessionParams {
+  applicationId?: string;
+  workflowMode: WorkflowMode;
+  requiredDocuments?: (string | DocumentRequirement)[];
+  detectedFields?: DetectedField[];
+  fieldRequirements?: AnalyzedRequirement[];
+  formUrl?: string;
+  pastedUrl?: string;
+  inspectedUrl?: string;
+  pageTitle?: string;
+  formActionUrl?: string;
+  targetTabId?: number;
+  targetWindowId?: number;
+  targetOrigin?: string;
+  baseUrl: string;
+}
+
+export interface UnifiedUploadSessionResult {
+  session: ApplicationSession;
+  uploadSession: UploadSession;
+  sessionId: string;
+  secureToken: string;
+  qrUrl: string;
+  qrDataUrl: string;
+  requiredDocuments: DocumentRequirement[];
+}
+
+/**
+ * Authoritative Unified Upload Session Generator
+ * ONE APPLICATION = ONE QR CODE
+ * Generates single secure token, single QR URL, canonical requirements array.
+ */
+export async function createUnifiedUploadSession(
+  params: CreateUnifiedSessionParams
+): Promise<UnifiedUploadSessionResult> {
+  const sessionId = params.applicationId || 'app_' + crypto.randomUUID().slice(0, 8);
+  const secureToken = crypto.randomBytes(16).toString('hex');
+  const cleanBaseUrl = (params.baseUrl || 'http://localhost:3000').trim().replace(/\/$/, '');
+  const qrUrl = `${cleanBaseUrl}/upload?session=${sessionId}&token=${secureToken}`;
+
+  const qrDataUrl = await QRCode.toDataURL(qrUrl, {
+    width: 320,
+    margin: 2,
+    color: { dark: '#0f172a', light: '#ffffff' },
+  });
+
+  const canonicalDocs: DocumentRequirement[] = [];
+  const rawDocs =
+    params.requiredDocuments && params.requiredDocuments.length > 0
+      ? params.requiredDocuments
+      : [
+          'Aadhaar Card',
+          'High School Marksheet',
+          'Intermediate Marksheet',
+          'Graduation Marksheet',
+          'Photograph',
+          'Signature',
+          'Caste Certificate',
+          'Income Certificate',
+        ];
+
+  for (let i = 0; i < rawDocs.length; i++) {
+    const raw = rawDocs[i];
+    const docName = typeof raw === 'string' ? raw.trim() : (raw.name || raw.documentType).trim();
+    const reqId = typeof raw === 'object' && raw.id ? raw.id : `req_${i + 1}_${crypto.randomUUID().slice(0, 6)}`;
+    const category = inferDocCategory(docName);
+
+    canonicalDocs.push({
+      id: reqId,
+      applicationId: sessionId,
+      name: docName,
+      type: category,
+      documentType: docName,
+      required: true,
+      acceptedMimeTypes: docName.toLowerCase().includes('pdf')
+        ? ['application/pdf']
+        : ['image/jpeg', 'image/png', 'application/pdf'],
+      maxSizeMB: 10,
+      uploadToken: secureToken,
+      qrDataUrl,
+      uploadUrl: qrUrl,
+      status: (typeof raw === 'object' && raw.status) || 'pending',
+      rejectionReason: typeof raw === 'object' ? raw.rejectionReason : undefined,
+      detectedType: typeof raw === 'object' ? raw.detectedType : undefined,
+      uploadedFileName: typeof raw === 'object' ? raw.uploadedFileName : undefined,
+      fileSizeBytes: typeof raw === 'object' ? raw.fileSizeBytes : undefined,
+      uploadedAt: typeof raw === 'object' ? raw.uploadedAt : undefined,
+      verifiedAt: typeof raw === 'object' ? raw.verifiedAt : undefined,
+    });
+  }
+
+  // Register session-level upload token (valid for ALL documents in this session)
+  await db.registerUploadToken(secureToken, sessionId, 'ALL', 'ALL', 120);
+
+  const initialMappings: FieldMapping[] = (params.fieldRequirements || []).map((fr, idx) => ({
+    id: `map_${idx}`,
+    source: fr.isManualEntry ? 'Manual Entry' : fr.sourceDocumentType || 'Document',
+    extractedValue: '',
+    targetField: fr.label,
+    targetSelector: `#${fr.targetFieldIdOrName}`,
+    targetId: fr.targetFieldIdOrName,
+    targetName: fr.targetFieldIdOrName,
+    confidence: fr.isManualEntry ? 1.0 : 0.0,
+    status: fr.isManualEntry ? 'manual_required' : 'attention_required',
+    isManualEntry: fr.isManualEntry,
+  }));
+
+  const activeUrl = params.formUrl || params.pastedUrl || params.inspectedUrl || '';
+  const nowIso = new Date().toISOString();
+  const expiresIso = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+
+  const session: ApplicationSession = {
+    id: sessionId,
+    workflowMode: params.workflowMode,
+    url: activeUrl,
+    pastedUrl: params.pastedUrl,
+    inspectedUrl: params.inspectedUrl,
+    pageTitle: params.pageTitle || '',
+    formActionUrl: params.formActionUrl || '',
+    inspectedAt: nowIso,
+    inspectionState: 'active_inspected',
+    targetTabId: params.targetTabId,
+    targetWindowId: params.targetWindowId,
+    targetOrigin: params.targetOrigin,
+    status: 'waiting_documents',
+    detectedFields: params.detectedFields || [],
+    requirements: params.fieldRequirements || [],
+    documentRequirements: canonicalDocs,
+    sessionUploadToken: secureToken,
+    sessionQrDataUrl: qrDataUrl,
+    sessionUploadUrl: qrUrl,
+    extractedData: [],
+    mappings: initialMappings,
+    unfilledRequiredFields: [],
+    createdAt: nowIso,
+    expiresAt: expiresIso,
+    storagePurged: false,
+  };
+
+  await db.saveSession(session);
+
+  const uploadSession: UploadSession = {
+    sessionId,
+    applicationId: sessionId,
+    workflowMode: params.workflowMode,
+    secureToken,
+    qrUrl,
+    qrDataUrl,
+    requiredDocuments: canonicalDocs,
+    uploadedDocuments: [],
+    processingDocuments: [],
+    verifiedDocuments: [],
+    rejectedDocuments: [],
+    failedDocuments: [],
+    status: 'waiting_documents',
+    createdAt: nowIso,
+    expiresAt: expiresIso,
+  };
+
+  return {
+    session,
+    uploadSession,
+    sessionId,
+    secureToken,
+    qrUrl,
+    qrDataUrl,
+    requiredDocuments: canonicalDocs,
+  };
+}

@@ -1,0 +1,12 @@
+{
+  "tokenHash": "94e423e22cc3fb5b61fb0d8288383913c20edf1a20113842c4e7310cac01be4d",
+  "rawToken": "95a81334906d2182f913dbc92ea1dedd",
+  "sessionId": "app_fd570262",
+  "applicationId": "app_fd570262",
+  "requirementId": "ALL",
+  "expectedDocumentType": "ALL",
+  "createdAt": "2026-09-13T13:50:31.597Z",
+  "expiresAt": 1789314631597,
+  "consumedAt": null,
+  "status": "active"
+}

@@ -270,6 +270,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
       aiPredictedMapping: m.extractedValue,
       operatorConfirmedMapping: editValue,
       wasCorrected: editValue !== m.extractedValue,
+      verified: true,
     };
 
     await onUpdateMapping(updated, feedback);
