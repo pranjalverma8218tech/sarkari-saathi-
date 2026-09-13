@@ -121,15 +121,32 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
         });
         setTabLostAlert(null);
       } else {
-        // If in URL_PASTE mode and tab was not opened yet:
+        // If in URL_PASTE mode and tab was not opened or not focused yet:
         if (effectiveMode === 'URL_PASTE' && !targetTabId) {
           const openRes = await openGovernmentForm(exactTargetUrl, sessionId);
-          if (openRes.success) {
+          if (openRes.success && openRes.tabId) {
             setIsLiveConnected(true);
+            const openedTabId = openRes.tabId;
+            const openedWindowId = openRes.windowId;
+
+            // Wait brief moment for DOM ready if new tab, then execute real autofill
+            const fillRes = await autofillForm({
+              sessionId,
+              targetTabId: openedTabId,
+              targetWindowId: openedWindowId,
+              mappings: currentMappings,
+            });
+
+            const successMsg = fillRes.success
+              ? `Live Government Page Connected ✓ Opened government form tab (#${openedTabId}). ${fillRes.filledCount} fields populated. Review entries and click Submit manually on the official website.`
+              : `Live Government Page Connected ✓ Opened government form tab (#${openedTabId}). Review all entries and click Submit manually on the official website.`;
+
             setTabActionResult({
               success: true,
-              message: `Live Government Page Connected ✓ Opened government form in background tab.`,
+              filledCount: fillRes.filledCount,
+              message: successMsg,
             });
+            setTabLostAlert(null);
             return;
           }
         }

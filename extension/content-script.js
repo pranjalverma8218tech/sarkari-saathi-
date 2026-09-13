@@ -137,13 +137,25 @@ function inspectLiveForm() {
 
 // Set value safely supporting React/Vue/Angular controlled inputs
 function setNativeValue(element, value) {
-  const isInput = element.tagName.toLowerCase() === 'input';
-  const isTextarea = element.tagName.toLowerCase() === 'textarea';
-  const isSelect = element.tagName.toLowerCase() === 'select';
+  if (!element) return false;
+  const tagName = element.tagName.toLowerCase();
+  const isInput = tagName === 'input';
+  const isTextarea = tagName === 'textarea';
+  const isSelect = tagName === 'select';
+
+  try {
+    element.focus();
+  } catch (e) {}
 
   if (isInput || isTextarea) {
     const proto = isInput ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
     const valueDescriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+
+    // Handle React internal tracker (React 15/16/17/18/19 _valueTracker)
+    const tracker = element._valueTracker;
+    if (tracker) {
+      tracker.setValue('' + (value || ''));
+    }
 
     if (valueDescriptor && valueDescriptor.set) {
       valueDescriptor.set.call(element, value);
@@ -151,19 +163,20 @@ function setNativeValue(element, value) {
       element.value = value;
     }
 
-    // Trigger synthetic events
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-    element.dispatchEvent(new Event('blur', { bubbles: true }));
+    // Trigger full synthetic event sequence for frameworks (React, Angular, Vue, Alpine, Svelte)
+    element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+    return true;
   } else if (isSelect) {
     // Match option by value or text
     let matched = false;
+    const valLower = ('' + value).toLowerCase().trim();
     for (let i = 0; i < element.options.length; i++) {
       const opt = element.options[i];
-      if (
-        opt.value.toLowerCase() === value.toLowerCase() ||
-        opt.text.toLowerCase().includes(value.toLowerCase())
-      ) {
+      const optVal = (opt.value || '').toLowerCase().trim();
+      const optText = (opt.text || '').toLowerCase().trim();
+      if (optVal === valLower || optText === valLower || optText.includes(valLower) || valLower.includes(optText)) {
         element.selectedIndex = i;
         matched = true;
         break;
@@ -172,9 +185,67 @@ function setNativeValue(element, value) {
     if (!matched && element.options.length > 0) {
       element.value = value;
     }
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-    element.dispatchEvent(new Event('blur', { bubbles: true }));
+    element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    element.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
+    return true;
   }
+  return false;
+}
+
+// Helper to fill split date fields (Day, Month, Year separate inputs/selects)
+function fillSplitDateFields(allInputs, rawDateStr) {
+  if (!rawDateStr || typeof rawDateStr !== 'string') return false;
+  const clean = rawDateStr.trim();
+  let day = '', month = '', year = '';
+
+  const dmyMatch = clean.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmyMatch) {
+    day = dmyMatch[1];
+    month = dmyMatch[2];
+    year = dmyMatch[3];
+  } else {
+    const ymdMatch = clean.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+    if (ymdMatch) {
+      year = ymdMatch[1];
+      month = ymdMatch[2];
+      day = ymdMatch[3];
+    }
+  }
+
+  if (!day || !month || !year) return false;
+
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  const monthIdx = parseInt(month, 10) - 1;
+  const monthName = monthNames[monthIdx] || '';
+
+  let filledAny = false;
+  allInputs.forEach((el) => {
+    const label = getFieldLabel(el).toLowerCase();
+    const name = (el.name || '').toLowerCase();
+    const id = (el.id || '').toLowerCase();
+    const isDay = label.includes('day') || name.includes('day') || id.includes('day') || name.includes('dob_dd');
+    const isMonth = label.includes('month') || name.includes('month') || id.includes('month') || name.includes('dob_mm');
+    const isYear = label.includes('year') || name.includes('year') || id.includes('year') || name.includes('dob_yyyy') || name.includes('dob_yy');
+
+    if (isDay && !el.value) {
+      setNativeValue(el, day);
+      filledAny = true;
+    } else if (isMonth && !el.value) {
+      if (el.tagName.toLowerCase() === 'select') {
+        // Try month number, padded number, and month name
+        setNativeValue(el, monthName || month);
+      } else {
+        setNativeValue(el, month);
+      }
+      filledAny = true;
+    } else if (isYear && !el.value) {
+      setNativeValue(el, year);
+      filledAny = true;
+    }
+  });
+
+  return filledAny;
 }
 
 // Helper to normalize and format dates for different input types
@@ -298,11 +369,18 @@ function executeAutoFill(mappings) {
         let radioMatched = false;
         for (const radio of radios) {
           const radioLabel = getFieldLabel(radio).toLowerCase().trim();
-          if (radio.value.toLowerCase() === valLower || radioLabel === valLower || radioLabel.includes(valLower)) {
+          const radioVal = (radio.value || '').toLowerCase().trim();
+          if (radioVal === valLower || radioLabel === valLower || radioLabel.includes(valLower) || valLower.includes(radioVal)) {
             radio.checked = true;
-            radio.dispatchEvent(new Event('input', { bubbles: true }));
-            radio.dispatchEvent(new Event('change', { bubbles: true }));
-            radio.dispatchEvent(new Event('blur', { bubbles: true }));
+            try { radio.focus(); } catch (e) {}
+            // Also click associated label if present (common for custom-styled react radio buttons)
+            const parentLabel = radio.closest('label');
+            if (parentLabel) {
+              try { parentLabel.click(); } catch (e) {}
+            }
+            radio.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+            radio.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+            radio.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
             radioMatched = true;
             break;
           }
@@ -317,11 +395,17 @@ function executeAutoFill(mappings) {
       // Checkbox handling
       if (type === 'checkbox') {
         const valLower = mapping.extractedValue.toLowerCase().trim();
-        const shouldCheck = ['true', 'yes', '1', 'checked', 'agree', 'y'].includes(valLower);
+        const shouldCheck = ['true', 'yes', '1', 'checked', 'agree', 'y'].includes(valLower) ||
+          valLower.includes((el.value || '').toLowerCase());
         el.checked = shouldCheck;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        try { el.focus(); } catch (e) {}
+        const parentLabel = el.closest('label');
+        if (parentLabel) {
+          try { parentLabel.click(); } catch (e) {}
+        }
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true, composed: true }));
         fillResults.filledCount++;
         fillResults.filledFields.push(mapping.targetField);
         continue;
@@ -330,6 +414,9 @@ function executeAutoFill(mappings) {
       // Input / Textarea / Select handling with date format normalization
       const normalizedValue = normalizeDateValue(mapping.extractedValue, type);
       setNativeValue(el, normalizedValue);
+
+      // Verify that value was actually populated
+      const verified = (el.value && el.value.length > 0) || el.selectedIndex >= 0;
 
       // Visual feedback: soft green background to clearly indicate auto-filled field
       el.style.backgroundColor = '#ecfdf5';
@@ -343,6 +430,18 @@ function executeAutoFill(mappings) {
       fillResults.filledCount++;
       fillResults.filledFields.push(mapping.targetField);
     } else {
+      // Check if this mapping is a Date of Birth and the form has split DOB fields (Day, Month, Year separate)
+      const isDob = (mapping.targetField || '').toLowerCase().includes('birth') ||
+        (mapping.targetField || '').toLowerCase().includes('dob');
+      if (isDob && mapping.extractedValue) {
+        const splitFilled = fillSplitDateFields(allInputs, mapping.extractedValue);
+        if (splitFilled) {
+          fillResults.filledCount++;
+          fillResults.filledFields.push(mapping.targetField + ' (Split Date)');
+          continue;
+        }
+      }
+
       fillResults.skippedFields.push(mapping.targetField);
     }
   }

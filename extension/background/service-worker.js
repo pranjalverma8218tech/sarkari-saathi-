@@ -608,14 +608,20 @@ function handleAutofillForm(message, sendResponse) {
     }
 
     // 2. Origin check (Security)
-    if (activeTabContext.origin) {
+    // Validate target tab URL against actual inspected/pasted government page URL origin
+    const expectedOrigin = activeTabContext.targetOrigin ||
+      (activeTabContext.inspectedUrl ? getOrigin(activeTabContext.inspectedUrl) : null) ||
+      (activeTabContext.url ? getOrigin(activeTabContext.url) : null) ||
+      (activeTabContext.pastedUrl ? getOrigin(activeTabContext.pastedUrl) : null);
+
+    if (expectedOrigin) {
       try {
         const tabOrigin = new URL(tab.url).origin;
-        if (tabOrigin !== activeTabContext.origin && !tab.url.includes('live-test-form')) {
+        if (tabOrigin !== expectedOrigin && !tab.url.includes('live-test-form')) {
           sendResponse({
             success: false,
             error: 'ORIGIN_MISMATCH',
-            message: `Target tab URL origin (${tabOrigin}) does not match registered form origin (${activeTabContext.origin}).`,
+            message: `Target tab URL origin (${tabOrigin}) does not match registered form origin (${expectedOrigin}).`,
           });
           return;
         }
