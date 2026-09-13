@@ -1,0 +1,21 @@
+{
+  "id": "test_deep_1789320344085",
+  "workflowMode": "EXTENSION_INSPECTION",
+  "url": "https://ssc.gov.in/apply/cgl/phase-12/registration.html?step=2&applicant_id=89432",
+  "inspectedUrl": "https://ssc.gov.in/apply/cgl/phase-12/registration.html?step=2&applicant_id=89432",
+  "pageTitle": "SSC CGL Phase XII Application Form",
+  "formActionUrl": "https://ssc.gov.in/apply/cgl/submit",
+  "targetTabId": 42,
+  "targetWindowId": 1,
+  "targetOrigin": "https://ssc.gov.in",
+  "status": "created",
+  "detectedFields": [],
+  "requirements": [],
+  "documentRequirements": [],
+  "extractedData": [],
+  "mappings": [],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-13T17:25:44.085Z",
+  "expiresAt": "2026-09-13T19:25:44.085Z",
+  "storagePurged": false
+}

@@ -120,16 +120,56 @@ export async function inspectTargetPage(
 
   // 3. Fetch remote page and parse form inputs if HTTP/HTTPS
   if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
-    try {
-      const response = await fetch(cleanUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        signal: AbortSignal.timeout(8000),
-      });
+    const fetchHeaders = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    };
 
-      if (response.ok) {
+    const isTimeoutError = (err: any): boolean => {
+      if (!err) return false;
+      const name = String(err.name || '');
+      const msg = String(err.message || '').toLowerCase();
+      return (
+        name === 'TimeoutError' ||
+        name === 'AbortError' ||
+        msg.includes('abort') ||
+        msg.includes('timed out') ||
+        msg.includes('timeout')
+      );
+    };
+
+    let response: Response | null = null;
+    try {
+      response = await fetch(cleanUrl, {
+        headers: fetchHeaders,
+        signal: AbortSignal.timeout(3500),
+      });
+    } catch (err: any) {
+      if (!isTimeoutError(err)) {
+        // Network connection error (e.g. ECONNRESET, ENOTFOUND, socket hang up) -> retry once
+        console.warn(
+          `[Form Inspector] Network error fetching ${cleanUrl} (${err.message}). Retrying once...`
+        );
+        try {
+          response = await fetch(cleanUrl, {
+            headers: fetchHeaders,
+            signal: AbortSignal.timeout(3500),
+          });
+        } catch (retryErr: any) {
+          console.warn(
+            `[Form Inspector] Retry fetch for ${cleanUrl} also failed (${retryErr.message}). Falling back to heuristic.`
+          );
+        }
+      } else {
+        console.warn(
+          `[Form Inspector] Fetch timed out for ${cleanUrl} (3500ms). Falling back to heuristic.`
+        );
+      }
+    }
+
+    if (response && response.ok) {
+      try {
         const html = await response.text();
         const parsed = parseHtmlFormFields(html);
         if (parsed.length > 0) {
@@ -139,9 +179,9 @@ export async function inspectTargetPage(
             formTitle: titleMatch ? titleMatch[1].trim() : undefined,
           };
         }
+      } catch (parseErr: any) {
+        console.warn(`[Form Inspector] Error parsing HTML from ${cleanUrl}:`, parseErr.message);
       }
-    } catch (err: any) {
-      console.warn(`[Form Inspector] Remote fetch for ${cleanUrl} failed:`, err.message);
     }
   }
 
