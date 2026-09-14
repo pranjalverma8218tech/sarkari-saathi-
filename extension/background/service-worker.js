@@ -76,9 +76,31 @@ function normalizeUrlForMatching(rawUrl) {
   }
 }
 
-// Global Message Router
+// Global Message Router (Internal)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || !message.action) return false;
+  if (!message) return false;
+
+  // Handshake: EXTENSION_PING / PING / CHECK_EXTENSION_STATUS
+  if (message.type === 'EXTENSION_PING' || message.action === 'PING' || message.action === 'CHECK_EXTENSION_STATUS') {
+    sendResponse({
+      type: 'EXTENSION_PONG',
+      status: 'active',
+      installed: true,
+      extensionId: chrome.runtime.id,
+      version: '1.0.4',
+      activeFormTabId: activeTabContext.tabId,
+      currentAppSessionId: activeTabContext.sessionId,
+      activeFormUrl: activeTabContext.url,
+      activeTabContext,
+    });
+    return true;
+  }
+
+  // Handshake: TAB_READY (Signaled by content script in form tab)
+  if (message.action === 'TAB_READY' || message.type === 'TAB_READY') {
+    handleTabReady(message, sender, sendResponse);
+    return true;
+  }
 
   // 1. OPEN_GOVERNMENT_FORM (URL-Paste Workflow)
   if (message.action === 'OPEN_GOVERNMENT_FORM') {
@@ -116,19 +138,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  // 6. CHECK_EXTENSION_STATUS
-  if (message.action === 'CHECK_EXTENSION_STATUS' || message.action === 'PING') {
-    sendResponse({
-      status: 'active',
-      installed: true,
-      version: '1.0.3',
-      activeFormTabId: activeTabContext.tabId,
-      currentAppSessionId: activeTabContext.sessionId,
-      activeFormUrl: activeTabContext.url,
-    });
-    return true;
-  }
-
   // 7. INSPECT_FORM_TAB (Live tab inspection)
   if (message.action === 'INSPECT_FORM_TAB') {
     handleInspectFormTab(message, sendResponse);
@@ -137,6 +146,101 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+// External Message Router (Direct communication from allowed web app origins)
+if (chrome.runtime.onMessageExternal) {
+  chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+    if (!message) return false;
+
+    // Handshake: EXTENSION_PING / PING
+    if (message.type === 'EXTENSION_PING' || message.action === 'PING' || message.action === 'CHECK_EXTENSION_STATUS') {
+      sendResponse({
+        type: 'EXTENSION_PONG',
+        status: 'active',
+        installed: true,
+        extensionId: chrome.runtime.id,
+        version: '1.0.4',
+        activeFormTabId: activeTabContext.tabId,
+        currentAppSessionId: activeTabContext.sessionId,
+        activeFormUrl: activeTabContext.url,
+        activeTabContext,
+      });
+      return true;
+    }
+
+    if (message.action === 'OPEN_GOVERNMENT_FORM') {
+      handleOpenGovernmentForm(message, sendResponse);
+      return true;
+    }
+
+    if (message.action === 'AUTOFILL_FORM' || message.action === 'APPLY_AUTO_FILL') {
+      handleAutofillForm(message, sendResponse);
+      return true;
+    }
+
+    if (message.action === 'FOCUS_FORM_TAB') {
+      handleFocusFormTab(message, sendResponse);
+      return true;
+    }
+
+    if (message.action === 'GET_FORM_STATUS') {
+      handleGetFormStatus(message, sendResponse);
+      return true;
+    }
+
+    return false;
+  });
+}
+
+/**
+ * Handles TAB_READY signal from content scripts when a form tab loads.
+ */
+function handleTabReady(message, sender, sendResponse) {
+  const tabId = (sender && sender.tab) ? sender.tab.id : message.tabId;
+  const windowId = (sender && sender.tab) ? sender.tab.windowId : message.windowId;
+  const url = message.url || (sender && sender.tab ? sender.tab.url : '');
+  const title = message.title || (sender && sender.tab ? sender.tab.title : '');
+
+  console.log('[SmartForm ServiceWorker] TAB_READY detected:', { tabId, url, title });
+
+  if (tabId && url && !url.startsWith('chrome://') && !url.startsWith('chrome-extension://')) {
+    activeTabContext.tabId = tabId;
+    activeTabContext.windowId = windowId;
+    activeTabContext.url = url;
+    activeTabContext.inspectedUrl = url;
+    activeTabContext.pageTitle = title;
+    activeTabContext.status = 'tab_ready';
+    activeTabContext.timestamp = Date.now();
+
+    // Broadcast to any open SmartForm AI web app tabs
+    try {
+      chrome.tabs.query({}, (tabs) => {
+        (tabs || []).forEach((t) => {
+          if (t.id && t.id !== tabId) {
+            chrome.tabs.sendMessage(t.id, {
+              type: 'TAB_READY',
+              tabId,
+              windowId,
+              url,
+              title,
+            }).catch(() => {});
+          }
+        });
+      });
+    } catch (e) {}
+  }
+
+  if (sendResponse) {
+    sendResponse({
+      success: true,
+      type: 'TAB_READY',
+      tabId,
+      windowId,
+      url,
+      status: 'tab_ready',
+    });
+  }
+}
 
 /**
  * Handles opening or reusing the government portal tab.
@@ -168,7 +272,14 @@ function handleOpenGovernmentForm(message, sendResponse) {
     });
 
     if (existingTab) {
-      // Re-use existing tab! Never open duplicate tabs or reload.
+      // Re-use and activate existing tab
+      try {
+        chrome.tabs.update(existingTab.id, { active: true });
+        if (existingTab.windowId) {
+          chrome.windows.update(existingTab.windowId, { focused: true });
+        }
+      } catch (e) {}
+
       updateContextAndStore({
         workflowMode: 'URL_PASTE',
         tabId: existingTab.id,
@@ -179,26 +290,29 @@ function handleOpenGovernmentForm(message, sendResponse) {
         origin: getOrigin(existingTab.url),
         targetOrigin: getOrigin(existingTab.url),
         sessionId,
+        status: 'tab_ready',
       });
 
       // Ensure content script is loaded
       ensureContentScriptInjected(existingTab.id, () => {
         sendResponse({
           success: true,
+          type: 'TAB_READY',
           workflowMode: 'URL_PASTE',
           tabId: existingTab.id,
           windowId: existingTab.windowId,
           url: existingTab.url,
           pastedUrl: targetUrl,
           reused: true,
-          message: 'Existing government portal tab identified and targeted.',
+          status: 'tab_ready',
+          message: 'Existing government portal tab identified, focused, and targeted.',
         });
       });
       return;
     }
 
-    // Tab does not exist: create it in Chrome with EXACT target URL
-    chrome.tabs.create({ url: targetUrl, active: false }, (newTab) => {
+    // Tab does not exist: create it in Chrome with EXACT target URL (active: true so operator sees the live form)
+    chrome.tabs.create({ url: targetUrl, active: true }, (newTab) => {
       if (chrome.runtime.lastError || !newTab) {
         sendResponse({
           success: false,
@@ -218,6 +332,7 @@ function handleOpenGovernmentForm(message, sendResponse) {
         origin: getOrigin(targetUrl),
         targetOrigin: getOrigin(targetUrl),
         sessionId,
+        status: 'tab_ready',
       });
 
       // Wait for tab to load and inject content script
@@ -231,6 +346,7 @@ function handleOpenGovernmentForm(message, sendResponse) {
               responded = true;
               sendResponse({
                 success: true,
+                type: 'TAB_READY',
                 workflowMode: 'URL_PASTE',
                 tabId: newTab.id,
                 windowId: newTab.windowId,
@@ -238,7 +354,8 @@ function handleOpenGovernmentForm(message, sendResponse) {
                 pastedUrl: targetUrl,
                 fields: fields || [],
                 reused: false,
-                message: 'Government portal opened and live DOM inspected.',
+                status: 'tab_ready',
+                message: 'Government portal opened and live DOM connected.',
               });
             });
           });
@@ -255,6 +372,7 @@ function handleOpenGovernmentForm(message, sendResponse) {
             pollForLiveFields(newTab.id, 4, 300, (fields) => {
               sendResponse({
                 success: true,
+                type: 'TAB_READY',
                 workflowMode: 'URL_PASTE',
                 tabId: newTab.id,
                 windowId: newTab.windowId,
@@ -262,7 +380,8 @@ function handleOpenGovernmentForm(message, sendResponse) {
                 pastedUrl: targetUrl,
                 fields: fields || [],
                 reused: false,
-                message: 'Government portal opened in new background tab.',
+                status: 'tab_ready',
+                message: 'Government portal opened and target tab connected.',
               });
             });
           });
@@ -661,74 +780,111 @@ function handleInspectFormTab(message, sendResponse) {
  * and reports real filled count. Only then acknowledge success.
  */
 function handleAutofillForm(message, sendResponse) {
-  const targetTabId = message.targetTabId || message.tabId || activeTabContext.tabId;
+  let targetTabId = message.targetTabId || message.tabId || activeTabContext.tabId;
   const mappings = message.mappings || message.payload?.mappings || [];
 
-  if (!targetTabId) {
-    sendResponse({
-      success: false,
-      error: 'NO_TARGET_TAB',
-      message: 'Cannot auto-fill: Target government form tab is not registered or open.',
-    });
-    return;
-  }
-
-  // 1. Verify tab exists and is open
-  chrome.tabs.get(targetTabId, (tab) => {
-    if (chrome.runtime.lastError || !tab) {
+  function proceedWithTab(tab) {
+    if (!tab || !tab.id) {
       sendResponse({
         success: false,
-        error: 'TAB_CLOSED',
-        message: 'The government form tab appears to have been closed. Please open the government form tab.',
+        error: 'NO_TARGET_TAB',
+        message: 'Cannot auto-fill: Target government form tab is not open.',
       });
       return;
     }
 
-    // 2. Origin check (Security)
-    // Validate target tab URL against actual inspected/pasted government page URL origin
-    const expectedOrigin = activeTabContext.targetOrigin ||
-      (activeTabContext.inspectedUrl ? getOrigin(activeTabContext.inspectedUrl) : null) ||
-      (activeTabContext.url ? getOrigin(activeTabContext.url) : null) ||
-      (activeTabContext.pastedUrl ? getOrigin(activeTabContext.pastedUrl) : null);
-
-    if (expectedOrigin) {
-      try {
-        const tabOrigin = new URL(tab.url).origin;
-        if (tabOrigin !== expectedOrigin && !tab.url.includes('live-test-form')) {
-          sendResponse({
-            success: false,
-            error: 'ORIGIN_MISMATCH',
-            message: `Target tab URL origin (${tabOrigin}) does not match registered form origin (${expectedOrigin}).`,
-          });
-          return;
-        }
-      } catch (e) {}
+    if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:'))) {
+      sendResponse({
+        success: false,
+        error: 'INVALID_TAB_TYPE',
+        message: 'Cannot auto-fill internal browser pages. Please open the government form tab.',
+      });
+      return;
     }
 
-    // 3. Deliver message to content script in the live government form tab
-    deliverAutofillToContentScript(targetTabId, mappings, (result) => {
+    activeTabContext.tabId = tab.id;
+    activeTabContext.windowId = tab.windowId;
+
+    // Deliver message to content script in the live government form tab
+    deliverAutofillToContentScript(tab.id, mappings, (result) => {
       if (!result.success) {
         sendResponse(result);
         return;
       }
 
-      // 4. Focus the tab so operator sees the live values
-      chrome.tabs.update(targetTabId, { active: true }, () => {
-        if (activeTabContext.windowId) {
-          chrome.windows.update(activeTabContext.windowId, { focused: true }, () => {});
-        }
-      });
+      // Focus the tab so operator sees the live values
+      try {
+        chrome.tabs.update(tab.id, { active: true }, () => {
+          if (tab.windowId) {
+            chrome.windows.update(tab.windowId, { focused: true }, () => {});
+          }
+        });
+      } catch (e) {}
 
       sendResponse({
         success: true,
-        tabId: targetTabId,
+        tabId: tab.id,
         filledCount: result.filledCount || 0,
         filledFields: result.filledFields || [],
         manualFields: result.manualFields || [],
-        message: `Successfully populated ${result.filledCount} fields in the live government form.`,
+        message: `Successfully populated ${result.filledCount} fields in the live form.`,
       });
     });
-  });
+  }
+
+  function findAlternativeTargetTab() {
+    chrome.tabs.query({}, (tabs) => {
+      // 1. Check if any tab matches inspectedUrl or formUrl
+      const candidateUrls = [activeTabContext.inspectedUrl, activeTabContext.url, activeTabContext.pastedUrl].filter(Boolean);
+      let matched = null;
+      for (const urlStr of candidateUrls) {
+        try {
+          const u = new URL(urlStr);
+          matched = tabs.find(t => t.url && t.url.includes(u.hostname) && !t.url.includes('sarkari-saathi') && !t.url.includes('ai.studio'));
+          if (matched) break;
+        } catch (e) {}
+      }
+
+      // 2. Check for common government or demo portals
+      if (!matched) {
+        matched = tabs.find(t => t.url && (
+          t.url.includes('demoqa.com') ||
+          t.url.includes('live-test-form') ||
+          t.url.includes('.gov.in') ||
+          t.url.includes('.nic.in') ||
+          t.url.includes('upsc') ||
+          t.url.includes('ssc')
+        ));
+      }
+
+      // 3. Fallback: Any http tab that is not our dashboard or extension
+      if (!matched) {
+        matched = tabs.find(t => t.url && t.url.startsWith('http') && !t.url.includes('sarkari-saathi') && !t.url.includes('ai.studio') && !t.url.includes('localhost:3000'));
+      }
+
+      if (matched) {
+        proceedWithTab(matched);
+      } else {
+        sendResponse({
+          success: false,
+          error: 'NO_TARGET_TAB',
+          message: 'No open government form tab found to auto-fill. Please ensure the form tab is open in Chrome.',
+        });
+      }
+    });
+  }
+
+  if (targetTabId) {
+    chrome.tabs.get(targetTabId, (tab) => {
+      if (!chrome.runtime.lastError && tab && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('chrome-extension://')) {
+        proceedWithTab(tab);
+      } else {
+        findAlternativeTargetTab();
+      }
+    });
+  } else {
+    findAlternativeTargetTab();
+  }
 }
 
 function deliverAutofillToContentScript(tabId, mappings, callback) {

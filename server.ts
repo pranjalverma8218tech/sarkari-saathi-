@@ -733,6 +733,104 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
       // Run real Gemini analysis
       const analysis = await ai.analyzeForm(fieldsToAnalyze, formUrl);
 
+      // If running in development / container preview, delegate session creation to public deployment
+      // so the physical phone scanning the QR code hits a pre-registered session and token on https://sarkari-saathi.ai.studio
+      if (req.hostname !== 'sarkari-saathi.ai.studio') {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 9000);
+          const remoteRes = await fetch('https://sarkari-saathi.ai.studio/api/forms/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+              formUrl: activeUrl,
+              pastedUrl: resolvedPastedUrl,
+              inspectedUrl: exactInspectedUrl,
+              workflowMode: resolvedMode,
+              pageTitle: pageTitle || inspectionResult.formTitle || analysis.formTitle,
+              formActionUrl,
+              detectedFields: fieldsToAnalyze,
+              targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
+              targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
+              targetOrigin: targetOrigin || (activeUrl ? new URL(activeUrl).origin : undefined),
+            }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (remoteRes.ok) {
+            const remoteData: any = await remoteRes.json();
+            if (remoteData && remoteData.sessionId && remoteData.documentRequirements) {
+              // Register all remote tokens in local cache
+              for (const reqDoc of remoteData.documentRequirements) {
+                if (reqDoc.uploadToken) {
+                  await db.registerUploadToken(
+                    reqDoc.uploadToken,
+                    remoteData.sessionId,
+                    reqDoc.id,
+                    reqDoc.documentType,
+                    120,
+                    { workflowMode: resolvedMode, scope: 'SINGLE_DOC', formUrl: activeUrl }
+                  );
+                }
+              }
+              if (remoteData.sessionUploadToken) {
+                await db.registerUploadToken(
+                  remoteData.sessionUploadToken,
+                  remoteData.sessionId,
+                  'ALL',
+                  'ALL_DOCUMENTS',
+                  120,
+                  { workflowMode: resolvedMode, scope: 'SESSION', formUrl: activeUrl }
+                );
+              }
+
+              const firstDoc = remoteData.documentRequirements?.[0];
+              const resolvedSessionUploadToken = remoteData.sessionUploadToken || firstDoc?.uploadToken;
+              const resolvedSessionUploadUrl = remoteData.sessionUploadUrl || firstDoc?.uploadUrl || `https://sarkari-saathi.ai.studio/upload?session=${encodeURIComponent(remoteData.sessionId)}&token=${encodeURIComponent(resolvedSessionUploadToken || '')}`;
+              const resolvedSessionQrDataUrl = remoteData.sessionQrDataUrl || firstDoc?.qrDataUrl;
+
+              remoteData.sessionUploadToken = resolvedSessionUploadToken;
+              remoteData.sessionUploadUrl = resolvedSessionUploadUrl;
+              remoteData.sessionQrDataUrl = resolvedSessionQrDataUrl;
+
+              // Save session locally
+              await db.saveSession({
+                id: remoteData.sessionId,
+                url: activeUrl,
+                pastedUrl: resolvedPastedUrl,
+                inspectedUrl: exactInspectedUrl,
+                workflowMode: resolvedMode,
+                pageTitle: pageTitle || remoteData.formTitle || analysis.formTitle,
+                formActionUrl,
+                status: 'waiting_documents',
+                detectedFields: fieldsToAnalyze,
+                requirements: analysis.fieldRequirements || [],
+                documentRequirements: remoteData.documentRequirements,
+                sessionUploadToken: resolvedSessionUploadToken,
+                sessionUploadUrl: resolvedSessionUploadUrl,
+                sessionQrDataUrl: resolvedSessionQrDataUrl,
+                targetTabId: typeof targetTabId === 'number' ? targetTabId : undefined,
+                targetWindowId: typeof targetWindowId === 'number' ? targetWindowId : undefined,
+                targetOrigin: targetOrigin || (activeUrl ? new URL(activeUrl).origin : undefined),
+                inspectedAt: new Date().toISOString(),
+                inspectionState: 'active_inspected',
+                extractedData: [],
+                mappings: [],
+                unfilledRequiredFields: [],
+                storagePurged: false,
+                createdAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 120 * 60 * 1000).toISOString(),
+              });
+
+              return res.json(remoteData);
+            }
+          }
+        } catch (syncErr) {
+          console.warn('[Session Sync] Notice while delegating session to public deployment:', syncErr);
+        }
+      }
+
       const baseUrl = getBaseUrl(req);
 
       // CORE ARCHITECTURAL DIRECTIVE: ONE APPLICATION = ONE QR CODE
@@ -986,14 +1084,14 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
   // 3. Customer Mobile Upload Endpoint: Real Document Upload & AI Verification
   app.post('/api/documents/upload', upload.single('file') as any, async (req, res) => {
     try {
-      const sessionId = (req.body.session || req.body.sessionId || '').trim();
+      let sessionId = (req.body.session || req.body.sessionId || '').trim();
       const uploadToken = (req.body.token || req.body.uploadToken || '').trim();
       const requestedReqId = (req.body.requirementId || '').trim();
       const requestedDocType = (req.body.docType || req.body.documentType || '').trim();
       const file = req.file;
 
-      if (!sessionId || !uploadToken) {
-        return res.status(400).json({ error: 'Session ID and upload token are required.' });
+      if (!uploadToken) {
+        return res.status(400).json({ error: 'Upload token is required.' });
       }
 
       if (!file) {
@@ -1002,8 +1100,16 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
 
       // Validate upload token against persistent store
       const tokenInfo = await db.getUploadToken(uploadToken);
-      if (!tokenInfo || (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId)) {
+      if (!tokenInfo) {
         return res.status(403).json({ error: 'Invalid or unknown upload token.' });
+      }
+
+      if (!sessionId) {
+        sessionId = tokenInfo.sessionId || tokenInfo.applicationId;
+      }
+
+      if (!sessionId || (tokenInfo.applicationId !== sessionId && tokenInfo.sessionId !== sessionId)) {
+        return res.status(403).json({ error: 'Invalid or unknown upload token for this session.' });
       }
       if (tokenInfo.expired || tokenInfo.consumed) {
         return res.status(410).json({ error: 'Upload link expired or already used. Please generate a new QR code.' });

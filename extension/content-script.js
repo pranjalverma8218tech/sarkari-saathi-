@@ -446,6 +446,34 @@ async function fillReactSelectMultiValue(inputEl, valStr) {
   return anyCommitted;
 }
 
+async function fillReactSelectSingleValue(containerOrInputEl, valStr) {
+  if (!containerOrInputEl || !valStr) return false;
+  let inputEl = containerOrInputEl;
+  if (containerOrInputEl.tagName !== 'INPUT') {
+    inputEl = containerOrInputEl.querySelector('input');
+  }
+  if (!inputEl) return false;
+
+  try {
+    inputEl.focus();
+  } catch (e) {}
+
+  setNativeValue(inputEl, valStr, false);
+  await new Promise((r) => setTimeout(r, 100));
+
+  const keyOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, composed: true, cancelable: true };
+  inputEl.dispatchEvent(new KeyboardEvent('keydown', keyOpts));
+  inputEl.dispatchEvent(new KeyboardEvent('keypress', keyOpts));
+  inputEl.dispatchEvent(new KeyboardEvent('keyup', keyOpts));
+
+  await new Promise((r) => setTimeout(r, 100));
+  try {
+    inputEl.blur();
+  } catch (e) {}
+
+  return true;
+}
+
 // Execute auto-fill from SmartForm AI payload
 async function executeAutoFill(mappings) {
   const fillResults = {
@@ -639,6 +667,73 @@ async function executeAutoFill(mappings) {
           fillResults.filledFields.push(mapping.targetField);
           continue;
         }
+      }
+    }
+
+    // Special handler: State (React-Select dropdown e.g. DemoQA #state)
+    if (targetLabelLower.includes('state')) {
+      const stateEl = document.querySelector('#state, #stateCity-wrapper #state, [id*="state"]');
+      if (stateEl) {
+        const ok = await fillReactSelectSingleValue(stateEl, valStr);
+        if (ok) {
+          fillResults.filledCount++;
+          fillResults.filledFields.push(mapping.targetField);
+          continue;
+        }
+      }
+    }
+
+    // Special handler: City (React-Select dropdown e.g. DemoQA #city)
+    if (targetLabelLower.includes('city')) {
+      const cityEl = document.querySelector('#city, #stateCity-wrapper #city, [id*="city"]');
+      if (cityEl) {
+        const ok = await fillReactSelectSingleValue(cityEl, valStr);
+        if (ok) {
+          fillResults.filledCount++;
+          fillResults.filledFields.push(mapping.targetField);
+          continue;
+        }
+      }
+    }
+
+    // Special handler: Candidate Name (Split into firstName and lastName for forms like DemoQA)
+    if ((targetLabelLower.includes('name') || targetLabelLower.includes('candidate')) && !targetLabelLower.includes('father') && !targetLabelLower.includes('mother')) {
+      const fn = document.querySelector('#firstName, input[name="firstName"]');
+      const ln = document.querySelector('#lastName, input[name="lastName"]');
+      if (fn && ln) {
+        const parts = valStr.split(' ');
+        const first = parts[0] || '';
+        const last = parts.slice(1).join(' ') || parts[0] || '';
+        setNativeValue(fn, first);
+        setNativeValue(ln, last);
+        fillResults.filledCount++;
+        fillResults.filledFields.push(mapping.targetField);
+        continue;
+      }
+    }
+
+    // Special handler: Date of Birth (#dateOfBirthInput)
+    if (targetLabelLower.includes('dob') || targetLabelLower.includes('date of birth') || targetLabelLower.includes('birth')) {
+      const dobInput = document.querySelector('#dateOfBirthInput, #dob, input[name="dob"]');
+      if (dobInput) {
+        setNativeValue(dobInput, valStr);
+        const enterEvt = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
+        dobInput.dispatchEvent(new KeyboardEvent('keydown', enterEvt));
+        dobInput.dispatchEvent(new KeyboardEvent('keyup', enterEvt));
+        fillResults.filledCount++;
+        fillResults.filledFields.push(mapping.targetField);
+        continue;
+      }
+    }
+
+    // Special handler: Current Address
+    if (targetLabelLower.includes('address') || targetLabelLower.includes('current address')) {
+      const addrEl = document.querySelector('#currentAddress, textarea[name="currentAddress"], #address');
+      if (addrEl) {
+        setNativeValue(addrEl, valStr);
+        fillResults.filledCount++;
+        fillResults.filledFields.push(mapping.targetField);
+        continue;
       }
     }
 
@@ -849,6 +944,22 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!request) return false;
 
+    // TAB_READY notification from background service worker
+    if (request.type === 'TAB_READY') {
+      const tabMsg = {
+        type: 'TAB_READY',
+        tabId: request.tabId,
+        windowId: request.windowId,
+        url: request.url,
+        title: request.title,
+      };
+      window.postMessage(tabMsg, '*');
+      if (window.parent && window.parent !== window) {
+        try { window.parent.postMessage(tabMsg, '*'); } catch (e) {}
+      }
+      return true;
+    }
+
     if (request.action === 'SMARTFORM_INSPECT_DOM') {
       const data = inspectLiveForm();
       sendResponse({ status: 'success', success: true, data });
@@ -865,7 +976,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
             results: finalRes,
             filledCount: finalRes.filledCount,
             filledFields: finalRes.filledFields,
-            unfilledRequiredFields: finalRes.unfilledRequiredFields,
+            manualFields: finalRes.manualRequiredFields || finalRes.unfilledRequiredFields || [],
+            unfilledRequiredFields: finalRes.unfilledRequiredFields || [],
           });
         })
         .catch((err) => {
@@ -886,14 +998,50 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
 window.addEventListener('message', (event) => {
   if (!event.data) return;
 
-  // 1. Extension Ping / Status Check
-  if (event.data.type === 'SMARTFORM_PING') {
-    window.postMessage({
-      type: 'SMARTFORM_PONG',
+  // 1. Extension Handshake: EXTENSION_PING / SMARTFORM_PING
+  if (event.data.type === 'EXTENSION_PING' || event.data.type === 'SMARTFORM_PING') {
+    const extId = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome.runtime.id : undefined;
+    const pongData = {
+      type: 'EXTENSION_PONG',
       id: event.data.id,
-      version: '1.0.3',
+      extensionId: extId,
+      version: '1.0.4',
+      status: 'active',
       installed: true,
-    }, '*');
+    };
+
+    window.postMessage(pongData, '*');
+    window.postMessage({ ...pongData, type: 'SMARTFORM_PONG' }, '*');
+    if (window.parent && window.parent !== window) {
+      try {
+        window.parent.postMessage(pongData, '*');
+        window.parent.postMessage({ ...pongData, type: 'SMARTFORM_PONG' }, '*');
+      } catch (e) {}
+    }
+
+    // Also forward to service worker if alive to synchronize background status
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({ action: 'PING' }, (bgRes) => {
+          if (bgRes && !chrome.runtime.lastError) {
+            const enrichedPong = {
+              type: 'EXTENSION_PONG',
+              id: event.data.id,
+              extensionId: extId,
+              version: '1.0.4',
+              status: 'active',
+              installed: true,
+              activeFormTabId: bgRes.activeFormTabId,
+              activeTabContext: bgRes.activeTabContext,
+            };
+            window.postMessage(enrichedPong, '*');
+            if (window.parent && window.parent !== window) {
+              try { window.parent.postMessage(enrichedPong, '*'); } catch (e) {}
+            }
+          }
+        });
+      } catch (e) {}
+    }
     return;
   }
 
@@ -913,7 +1061,7 @@ window.addEventListener('message', (event) => {
             status: 'success',
             filledCount: localResults.filledCount,
             filledFields: localResults.filledFields,
-            manualFields: localResults.unfilledRequiredFields,
+            manualFields: localResults.manualRequiredFields || localResults.unfilledRequiredFields || [],
             results: localResults,
           }, '*');
         });
@@ -987,10 +1135,67 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Announce extension presence to the webpage
+// Announce extension presence to the webpage and iframe ancestors
 try {
   window.__SMARTFORM_EXTENSION_INSTALLED__ = true;
-  window.postMessage({ type: 'SMARTFORM_EXTENSION_READY', version: '1.0.3' }, '*');
-  document.dispatchEvent(new CustomEvent('SmartFormExtensionReady', { detail: { version: '1.0.3' } }));
+  const extId = (typeof chrome !== 'undefined' && chrome.runtime) ? chrome.runtime.id : undefined;
+
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.setAttribute('data-smartform-extension-active', 'true');
+    if (extId) {
+      document.documentElement.setAttribute('data-smartform-extension-id', extId);
+    }
+    document.documentElement.setAttribute('data-smartform-extension-version', '1.0.4');
+  }
+
+  const readyPayload = {
+    type: 'EXTENSION_READY',
+    extensionId: extId,
+    version: '1.0.4',
+    status: 'active',
+  };
+
+  window.postMessage(readyPayload, '*');
+  window.postMessage({ ...readyPayload, type: 'SMARTFORM_EXTENSION_READY' }, '*');
+
+  if (window.parent && window.parent !== window) {
+    try {
+      window.parent.postMessage(readyPayload, '*');
+      window.parent.postMessage({ ...readyPayload, type: 'SMARTFORM_EXTENSION_READY' }, '*');
+    } catch (e) {}
+  }
+
+  document.dispatchEvent(new CustomEvent('EXTENSION_READY', { detail: readyPayload }));
+  document.dispatchEvent(new CustomEvent('SmartFormExtensionReady', { detail: readyPayload }));
+  window.dispatchEvent(new CustomEvent('EXTENSION_READY', { detail: readyPayload }));
+} catch (e) {}
+
+// If this page is a government portal or test form, automatically signal TAB_READY to service worker
+try {
+  const isFormPage =
+    window.location.href.includes('demoqa.com') ||
+    window.location.href.includes('live-test-form') ||
+    window.location.href.includes('.gov.in') ||
+    window.location.href.includes('.nic.in') ||
+    document.querySelectorAll('input, select, textarea').length >= 3;
+
+  const isSmartFormWebApp =
+    window.location.pathname === '/' ||
+    window.location.pathname.startsWith('/session') ||
+    document.title.includes('SmartForm AI');
+
+  if (isFormPage && !isSmartFormWebApp) {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      chrome.runtime.sendMessage({
+        action: 'TAB_READY',
+        type: 'TAB_READY',
+        url: window.location.href,
+        title: document.title,
+        fieldCount: document.querySelectorAll('input, select, textarea').length,
+      }, (res) => {
+        // Tab successfully registered
+      });
+    }
+  }
 } catch (e) {}
 

@@ -88,7 +88,7 @@ export const ReviewScreen: React.FC<ReviewScreenProps> = ({
     setTabActionResult(null);
 
     try {
-      const isExtInstalled = await isExtensionInstalled(false, 400);
+      const isExtInstalled = await isExtensionInstalled(false, 1500);
       let handledByExtension = false;
 
       if (isExtInstalled) {

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SmartForm AI Assistant",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "Chrome Manifest V3 Extension for SmartForm AI. Inspects live government forms and performs intelligent DOM auto-fill.",
   "permissions": [
     "activeTab",
@@ -23,6 +23,14 @@
       "all_frames": true
     }
   ],
+  "externally_connectable": {
+    "matches": [
+      "*://localhost/*",
+      "*://127.0.0.1/*",
+      "https://*.run.app/*",
+      "https://*.ai.studio/*"
+    ]
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "SmartForm AI"

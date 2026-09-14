@@ -467,6 +467,40 @@ export const db = {
       }
     }
 
+    // 4. Remote Canonical Public URL Fallback (for tokens registered on https://sarkari-saathi.ai.studio)
+    if (!record && CANONICAL_PUBLIC_APP_URL) {
+      try {
+        const canonicalUrl = `${CANONICAL_PUBLIC_APP_URL}/upload?token=${encodeURIComponent(cleanToken)}&format=json`;
+        const res = await fetch(canonicalUrl, { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          const remoteJson: any = await res.json();
+          if (remoteJson && remoteJson.valid) {
+            record = {
+              tokenHash,
+              rawToken: cleanToken,
+              sessionId: remoteJson.sessionId,
+              applicationId: remoteJson.sessionId,
+              workflowMode: 'URL_PASTE',
+              scope: 'SINGLE_DOC',
+              formUrl: '',
+              requirementId: remoteJson.targetRequirement?.id || 'ALL',
+              expectedDocumentType: remoteJson.expectedType || remoteJson.targetRequirement?.name || 'Required Document',
+              requiredDocuments: remoteJson.documentRequirements || [],
+              createdAt: new Date().toISOString(),
+              expiresAt: typeof remoteJson.expiresAt === 'number' ? remoteJson.expiresAt : (Date.now() + 3600000),
+              consumedAt: null,
+              status: remoteJson.status || 'active',
+            };
+            storageTier = 'L1_memory';
+            inMemoryUploadTokens.set(cleanToken, record);
+            inMemoryUploadTokens.set(tokenHash, record);
+          }
+        }
+      } catch {
+        // network or timeout
+      }
+    }
+
     if (!record) return null;
 
     // Check validity state strictly (READ-ONLY)

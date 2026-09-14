@@ -213,10 +213,35 @@ document.addEventListener('DOMContentLoaded', async () => {
       fetch(`${serverUrl}/api/sessions/${currentStoredSessionId}`)
         .then((r) => r.json())
         .then((session) => {
-          if (!session || !session.mappings) {
+          if (!session) {
             autoFillLiveTabBtn.disabled = false;
             autoFillLiveTabBtn.innerText = '⚡ Auto-Fill Into This Live Tab';
-            showAlert('Could not retrieve extracted field mappings.');
+            showAlert('Could not retrieve active application session.');
+            return;
+          }
+
+          let effectiveMappings = session.mappings || [];
+          if ((!effectiveMappings || effectiveMappings.length === 0) && session.extractedData && session.extractedData.length > 0) {
+            effectiveMappings = (session.detectedFields || []).map((field) => {
+              const fieldLabel = (field.label || field.name || '').toLowerCase();
+              const match = session.extractedData.find((ext) => {
+                const extKey = (ext.key || ext.fieldName || '').toLowerCase();
+                return fieldLabel.includes(extKey) || extKey.includes(fieldLabel);
+              });
+              return {
+                targetField: field.label || field.name,
+                targetSelector: field.selector,
+                extractedValue: match ? match.value : '',
+                confidence: match ? 0.95 : 0,
+                isManualEntry: !match,
+              };
+            });
+          }
+
+          if (effectiveMappings.length === 0) {
+            autoFillLiveTabBtn.disabled = false;
+            autoFillLiveTabBtn.innerText = '⚡ Auto-Fill Into This Live Tab';
+            showAlert('No verified extracted details found yet. Please upload documents first.');
             return;
           }
 
@@ -225,13 +250,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
           chrome.runtime.sendMessage(
             {
-              action: 'APPLY_AUTO_FILL',
+              action: 'AUTOFILL_FORM',
               targetTabId: targetId,
               tabId: targetId,
               sessionId: currentStoredSessionId,
+              mappings: effectiveMappings,
               payload: {
                 sessionId: currentStoredSessionId,
-                mappings: session.mappings,
+                mappings: effectiveMappings,
               },
             },
             (response) => {

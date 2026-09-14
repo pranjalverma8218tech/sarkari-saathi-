@@ -1,0 +1,15 @@
+{
+  "tokenHash": "311a57f640a3a829094b00b1c3f316901f80e9e9ef1717e001be8124b666e8f5",
+  "rawToken": "e651221a2da21102db13225f61b95eed",
+  "sessionId": "app_728c44a9",
+  "applicationId": "app_728c44a9",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "https://demoqa.com/automation-practice-form",
+  "requirementId": "req_9609ffbc",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-14T08:15:59.363Z",
+  "expiresAt": 1789380959363,
+  "consumedAt": null,
+  "status": "active"
+}

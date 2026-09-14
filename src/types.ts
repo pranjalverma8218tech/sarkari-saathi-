@@ -70,6 +70,7 @@ export interface DocumentRequirement {
   fileSizeBytes?: number;
   uploadedAt?: string;
   verifiedAt?: string;
+  extractedData?: any;
 }
 
 export interface CanonicalDocumentRequirement extends DocumentRequirement {

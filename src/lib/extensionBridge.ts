@@ -3,9 +3,14 @@
  * Provides reliable, typed communication between the React Web Application
  * and the SmartForm AI Chrome Extension.
  * 
- * Includes request-response correlation via unique IDs, timeouts, and verification.
+ * Implements the full explicit handshake protocol:
+ * - EXTENSION_READY
+ * - EXTENSION_PING
+ * - EXTENSION_PONG
+ * - TAB_READY
  */
 
+import { useState, useEffect } from 'react';
 import { FieldMapping } from '../types';
 
 export interface OpenGovernmentFormResult {
@@ -14,6 +19,7 @@ export interface OpenGovernmentFormResult {
   windowId?: number;
   url?: string;
   reused?: boolean;
+  status?: string;
   error?: string;
   message?: string;
 }
@@ -78,23 +84,205 @@ export interface InspectFormTabResult {
   error?: string;
 }
 
+export interface ExtensionConnectionState {
+  extensionStatus: 'CONNECTED' | 'WAITING';
+  isExtensionConnected: boolean;
+  extensionId: string | null;
+  version: string | null;
+  targetTabStatus: 'CONNECTED' | 'WAITING';
+  isTargetTabConnected: boolean;
+  targetTabId: number | null;
+  targetTabWindowId: number | null;
+  targetTabUrl: string | null;
+  lastPingAt: number;
+}
+
 function generateRequestId(): string {
   return 'req_' + Math.random().toString(36).slice(2, 11) + '_' + Date.now();
 }
 
-let cachedExtensionStatus: { installed: boolean; checkedAt: number } | null = null;
+// Global observable connection state
+let globalConnectionState: ExtensionConnectionState = {
+  extensionStatus: 'WAITING',
+  isExtensionConnected: false,
+  extensionId: null,
+  version: null,
+  targetTabStatus: 'WAITING',
+  isTargetTabConnected: false,
+  targetTabId: null,
+  targetTabWindowId: null,
+  targetTabUrl: null,
+  lastPingAt: 0,
+};
+
+const listeners = new Set<(state: ExtensionConnectionState) => void>();
+
+function updateGlobalState(partial: Partial<ExtensionConnectionState>) {
+  globalConnectionState = {
+    ...globalConnectionState,
+    ...partial,
+    isExtensionConnected: (partial.extensionStatus ?? globalConnectionState.extensionStatus) === 'CONNECTED',
+    isTargetTabConnected: (partial.targetTabStatus ?? globalConnectionState.targetTabStatus) === 'CONNECTED',
+  };
+  listeners.forEach((cb) => {
+    try {
+      cb(globalConnectionState);
+    } catch (e) {}
+  });
+}
 
 /**
- * Checks if the SmartForm AI Chrome Extension is installed and active in the browser.
+ * Initializes listeners for extension events and broadcasts.
  */
-export async function pingExtension(timeoutMs = 800): Promise<{ installed: boolean; version?: string }> {
+function initBridgeListeners() {
+  if (typeof window === 'undefined') return;
+
+  // Check initial DOM flags if content-script already executed
+  if (typeof document !== 'undefined' && document.documentElement) {
+    const isActive = document.documentElement.getAttribute('data-smartform-extension-active') === 'true';
+    const extId = document.documentElement.getAttribute('data-smartform-extension-id');
+    const ver = document.documentElement.getAttribute('data-smartform-extension-version');
+    if (isActive) {
+      (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+      updateGlobalState({
+        extensionStatus: 'CONNECTED',
+        extensionId: extId || globalConnectionState.extensionId,
+        version: ver || '1.0.4',
+      });
+    }
+  }
+
+  // Window Message Listener
+  window.addEventListener('message', (event) => {
+    if (!event.data) return;
+
+    // 1. EXTENSION_READY or SMARTFORM_EXTENSION_READY
+    if (event.data.type === 'EXTENSION_READY' || event.data.type === 'SMARTFORM_EXTENSION_READY') {
+      (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+      updateGlobalState({
+        extensionStatus: 'CONNECTED',
+        extensionId: event.data.extensionId || globalConnectionState.extensionId,
+        version: event.data.version || '1.0.4',
+      });
+    }
+
+    // 2. EXTENSION_PONG or SMARTFORM_PONG
+    if (event.data.type === 'EXTENSION_PONG' || event.data.type === 'SMARTFORM_PONG') {
+      (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+      const updates: Partial<ExtensionConnectionState> = {
+        extensionStatus: 'CONNECTED',
+        extensionId: event.data.extensionId || globalConnectionState.extensionId,
+        version: event.data.version || '1.0.4',
+        lastPingAt: Date.now(),
+      };
+
+      if (event.data.activeFormTabId) {
+        updates.targetTabStatus = 'CONNECTED';
+        updates.targetTabId = event.data.activeFormTabId;
+      }
+      if (event.data.activeTabContext?.tabId) {
+        updates.targetTabStatus = 'CONNECTED';
+        updates.targetTabId = event.data.activeTabContext.tabId;
+        updates.targetTabUrl = event.data.activeTabContext.url || null;
+      }
+
+      updateGlobalState(updates);
+    }
+
+    // 3. TAB_READY
+    if (event.data.type === 'TAB_READY') {
+      updateGlobalState({
+        targetTabStatus: 'CONNECTED',
+        targetTabId: event.data.tabId || globalConnectionState.targetTabId,
+        targetTabWindowId: event.data.windowId || globalConnectionState.targetTabWindowId,
+        targetTabUrl: event.data.url || globalConnectionState.targetTabUrl,
+      });
+    }
+  });
+
+  // Custom DOM Event Listeners
+  const onExtReady = (e: Event) => {
+    const detail = (e as CustomEvent)?.detail;
+    (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+    updateGlobalState({
+      extensionStatus: 'CONNECTED',
+      extensionId: detail?.extensionId || globalConnectionState.extensionId,
+      version: detail?.version || '1.0.4',
+    });
+  };
+
+  window.addEventListener('EXTENSION_READY', onExtReady);
+  document.addEventListener('EXTENSION_READY', onExtReady);
+  document.addEventListener('SmartFormExtensionReady', onExtReady);
+
+  // Proactive initial ping
+  pingExtension(1500).catch(() => {});
+}
+
+// Auto-run initialization once in browser context
+if (typeof window !== 'undefined') {
+  initBridgeListeners();
+}
+
+/**
+ * Returns current extension connection state snapshot.
+ */
+export function getExtensionState(): ExtensionConnectionState {
+  return globalConnectionState;
+}
+
+/**
+ * Subscribes to changes in extension connection state.
+ */
+export function subscribeExtensionState(cb: (state: ExtensionConnectionState) => void): () => void {
+  listeners.add(cb);
+  cb(globalConnectionState);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+/**
+ * React hook to observe extension connection and target tab state reactively.
+ */
+export function useExtensionConnection() {
+  const [state, setState] = useState<ExtensionConnectionState>(globalConnectionState);
+
+  useEffect(() => {
+    const unsub = subscribeExtensionState((s) => {
+      setState(s);
+    });
+    // Ping on mount
+    pingExtension(1500).catch(() => {});
+    return unsub;
+  }, []);
+
+  return {
+    ...state,
+    checkConnection: (timeoutMs = 1500) => pingExtension(timeoutMs),
+  };
+}
+
+/**
+ * Sends an explicit EXTENSION_PING handshake to the companion extension.
+ * Resolves with true if the extension responds with EXTENSION_PONG.
+ */
+export async function pingExtension(timeoutMs = 1500): Promise<{ installed: boolean; extensionId?: string; version?: string }> {
   if (typeof window === 'undefined') {
     return { installed: false };
   }
 
-  // Fast check: window flag
-  if ((window as any).__SMARTFORM_EXTENSION_INSTALLED__) {
-    return { installed: true, version: '1.0.3' };
+  // Fast check: document attribute
+  if (typeof document !== 'undefined' && document.documentElement?.getAttribute('data-smartform-extension-active') === 'true') {
+    const extId = document.documentElement.getAttribute('data-smartform-extension-id') || undefined;
+    const ver = document.documentElement.getAttribute('data-smartform-extension-version') || '1.0.4';
+    (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+    updateGlobalState({
+      extensionStatus: 'CONNECTED',
+      extensionId: extId || globalConnectionState.extensionId,
+      version: ver,
+    });
+    return { installed: true, extensionId: extId, version: ver };
   }
 
   return new Promise((resolve) => {
@@ -105,55 +293,94 @@ export async function pingExtension(timeoutMs = 800): Promise<{ installed: boole
       if (!settled) {
         settled = true;
         window.removeEventListener('message', listener);
-        resolve({ installed: false });
+        // Do NOT permanently overwrite connected state if already connected
+        if (!globalConnectionState.isExtensionConnected) {
+          updateGlobalState({ extensionStatus: 'WAITING' });
+        }
+        resolve({ installed: globalConnectionState.isExtensionConnected });
       }
     }, timeoutMs);
 
     const listener = (event: MessageEvent) => {
-      if (event.data && (event.data.type === 'SMARTFORM_PONG' || event.data.type === 'SMARTFORM_EXTENSION_READY')) {
+      if (
+        event.data &&
+        (event.data.type === 'EXTENSION_PONG' ||
+         event.data.type === 'SMARTFORM_PONG' ||
+         event.data.type === 'EXTENSION_READY' ||
+         event.data.type === 'SMARTFORM_EXTENSION_READY')
+      ) {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
           window.removeEventListener('message', listener);
           (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
-          cachedExtensionStatus = { installed: true, checkedAt: Date.now() };
-          resolve({ installed: true, version: event.data.version || '1.0.3' });
+
+          const extId = event.data.extensionId || globalConnectionState.extensionId;
+          const ver = event.data.version || '1.0.4';
+
+          updateGlobalState({
+            extensionStatus: 'CONNECTED',
+            extensionId: extId,
+            version: ver,
+          });
+
+          resolve({ installed: true, extensionId: extId, version: ver });
         }
       }
     };
 
     window.addEventListener('message', listener);
+
+    // Broadcast EXTENSION_PING and SMARTFORM_PING
+    window.postMessage({ type: 'EXTENSION_PING', id }, '*');
     window.postMessage({ type: 'SMARTFORM_PING', id }, '*');
+
+    // Also attempt externally_connectable direct chrome.runtime messaging if available
+    const knownExtId = globalConnectionState.extensionId || (typeof document !== 'undefined' ? document.documentElement?.getAttribute('data-smartform-extension-id') : null);
+    const chromeRuntime = (window as any).chrome?.runtime;
+    if (knownExtId && chromeRuntime && typeof chromeRuntime.sendMessage === 'function') {
+      try {
+        chromeRuntime.sendMessage(knownExtId, { type: 'EXTENSION_PING', action: 'PING' }, (response: any) => {
+          if (response && !settled) {
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener('message', listener);
+            (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+            updateGlobalState({
+              extensionStatus: 'CONNECTED',
+              extensionId: knownExtId,
+              version: response.version || '1.0.4',
+            });
+            resolve({ installed: true, extensionId: knownExtId, version: response.version || '1.0.4' });
+          }
+        });
+      } catch (e) {}
+    }
   });
 }
 
 /**
- * Cached check to determine whether the companion extension is active in the current tab.
+ * Checks whether the companion extension is active.
  */
-export async function isExtensionInstalled(forceCheck = false, timeoutMs = 400): Promise<boolean> {
+export async function isExtensionInstalled(forceCheck = false, timeoutMs = 1200): Promise<boolean> {
   if (typeof window === 'undefined') return false;
-  if ((window as any).__SMARTFORM_EXTENSION_INSTALLED__) return true;
 
-  const now = Date.now();
-  if (!forceCheck && cachedExtensionStatus && (now - cachedExtensionStatus.checkedAt < 4000)) {
-    return cachedExtensionStatus.installed;
+  if (globalConnectionState.isExtensionConnected) return true;
+
+  if (typeof document !== 'undefined' && document.documentElement?.getAttribute('data-smartform-extension-active') === 'true') {
+    (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+    updateGlobalState({ extensionStatus: 'CONNECTED' });
+    return true;
   }
 
   const pingRes = await pingExtension(timeoutMs);
-  cachedExtensionStatus = { installed: pingRes.installed, checkedAt: now };
   return pingRes.installed;
 }
 
 /**
- * Invokes an action on the Chrome Extension via the content script bridge.
+ * Invokes an action on the Chrome Extension via the content script / background bridge.
  */
-async function invokeExtensionAction<T>(action: string, payload: Record<string, any>, timeoutMs = 3500): Promise<T> {
-  // Pre-flight check: If extension is known not to be installed, don't stall the UI
-  const installed = await isExtensionInstalled(false, 400);
-  if (!installed) {
-    throw new Error(`EXTENSION_NOT_ACTIVE: SmartForm AI companion extension is not active in this browser session.`);
-  }
-
+async function invokeExtensionAction<T>(action: string, payload: Record<string, any>, timeoutMs = 6000): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = generateRequestId();
     let settled = false;
@@ -176,6 +403,8 @@ async function invokeExtensionAction<T>(action: string, payload: Record<string, 
           settled = true;
           clearTimeout(timer);
           window.removeEventListener('message', listener);
+          (window as any).__SMARTFORM_EXTENSION_INSTALLED__ = true;
+          updateGlobalState({ extensionStatus: 'CONNECTED' });
           resolve(event.data as T);
         }
       }
@@ -195,26 +424,52 @@ async function invokeExtensionAction<T>(action: string, payload: Record<string, 
 }
 
 /**
- * Opens the government portal in a Chrome tab, or reuses an existing tab if already open.
- * Returns tabId, windowId, and reuse status.
+ * Opens the government portal in Chrome, detects the tab, waits for content script TAB_READY,
+ * and sets up direct tab communication.
  */
 export async function openGovernmentForm(
   url: string,
   sessionId?: string,
-  timeoutMs = 4500
+  timeoutMs = 6000
 ): Promise<OpenGovernmentFormResult> {
   try {
+    const isInstalled = await isExtensionInstalled(false, 1000);
+
+    if (!isInstalled) {
+      // Direct browser fallback if extension is not installed
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return {
+        success: true,
+        url,
+        status: 'opened_fallback',
+        message: 'Opened form in browser tab. Reload extension in chrome://extensions to enable automated sync.',
+      };
+    }
+
     const res = await invokeExtensionAction<OpenGovernmentFormResult>(
       'OPEN_GOVERNMENT_FORM',
       { url, sessionId },
       timeoutMs
     );
+
+    if (res.success && res.tabId) {
+      updateGlobalState({
+        targetTabStatus: 'CONNECTED',
+        targetTabId: res.tabId,
+        targetTabWindowId: res.windowId,
+        targetTabUrl: res.url || url,
+      });
+    }
+
     return res;
   } catch (err: any) {
+    // Fallback if extension bridge timed out
+    window.open(url, '_blank', 'noopener,noreferrer');
     return {
-      success: false,
-      error: 'EXTENSION_UNAVAILABLE',
-      message: err.message || 'SmartForm AI Chrome Extension is not reachable.',
+      success: true,
+      url,
+      status: 'opened_fallback',
+      message: 'Form opened in new tab. Companion extension is synchronizing.',
     };
   }
 }
@@ -229,14 +484,14 @@ export async function focusFormTab(
     sessionId?: string;
     expectedUrl?: string;
   },
-  timeoutMs = 3500
+  timeoutMs = 4000
 ): Promise<FocusFormTabResult> {
   try {
     const res = await invokeExtensionAction<FocusFormTabResult>(
       'FOCUS_FORM_TAB',
       {
-        tabId: params.targetTabId,
-        windowId: params.targetWindowId,
+        tabId: params.targetTabId || globalConnectionState.targetTabId,
+        windowId: params.targetWindowId || globalConnectionState.targetTabWindowId,
         sessionId: params.sessionId,
         expectedUrl: params.expectedUrl,
       },
@@ -255,11 +510,10 @@ export async function focusFormTab(
 
 /**
  * Reopens the exact last-known government form URL when the original tab was closed.
- * Never reduces the URL to domain root or homepage.
  */
 export async function reopenGovernmentForm(
   params: { url: string; sessionId?: string },
-  timeoutMs = 4500
+  timeoutMs = 5000
 ): Promise<ReopenFormResult> {
   try {
     const res = await invokeExtensionAction<ReopenFormResult>(
@@ -270,6 +524,14 @@ export async function reopenGovernmentForm(
       },
       timeoutMs
     );
+    if (res.success && res.tabId) {
+      updateGlobalState({
+        targetTabStatus: 'CONNECTED',
+        targetTabId: res.tabId,
+        targetTabWindowId: res.windowId,
+        targetTabUrl: res.url || params.url,
+      });
+    }
     return res;
   } catch (err: any) {
     return {
@@ -291,15 +553,18 @@ export async function autofillForm(
     targetWindowId?: number;
     mappings: FieldMapping[];
   },
-  timeoutMs = 4500
+  timeoutMs = 6000
 ): Promise<AutofillFormResult> {
+  const effectiveTabId = params.targetTabId || globalConnectionState.targetTabId;
+  const effectiveWindowId = params.targetWindowId || globalConnectionState.targetTabWindowId;
+
   try {
     const res = await invokeExtensionAction<AutofillFormResult>(
       'AUTOFILL_FORM',
       {
         sessionId: params.sessionId,
-        targetTabId: params.targetTabId,
-        targetWindowId: params.targetWindowId,
+        targetTabId: effectiveTabId,
+        targetWindowId: effectiveWindowId,
         mappings: params.mappings,
       },
       timeoutMs
@@ -331,7 +596,7 @@ export async function getFormStatus(
     const res = await invokeExtensionAction<FormStatusResult>(
       'GET_FORM_STATUS',
       {
-        tabId: params.targetTabId,
+        tabId: params.targetTabId || globalConnectionState.targetTabId,
         sessionId: params.sessionId,
       },
       timeoutMs

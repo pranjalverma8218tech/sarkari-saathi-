@@ -1,0 +1,15 @@
+{
+  "tokenHash": "78bd1f7b7c35c001e5ee65c1e1514f23e9c5d585268364cf0a9f29e398ab3b70",
+  "rawToken": "874e6264757423cdf4ccb05f042db039",
+  "sessionId": "app_728c44a9",
+  "applicationId": "app_728c44a9",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "https://demoqa.com/automation-practice-form",
+  "requirementId": "req_8addb97f",
+  "expectedDocumentType": "Identity Proof",
+  "createdAt": "2026-09-14T08:15:58.657Z",
+  "expiresAt": 1789380958657,
+  "consumedAt": null,
+  "status": "active"
+}
