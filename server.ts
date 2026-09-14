@@ -69,27 +69,64 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
-  // Helper to determine server base URL
+  const isInternalOrBlockedHost = (hostOrUrl: string): boolean => {
+    if (!hostOrUrl) return true;
+    const lower = hostOrUrl.toLowerCase();
+    return (
+      lower.includes('localhost') ||
+      lower.includes('127.0.0.1') ||
+      lower.includes('ais-dev-') ||
+      lower.includes('ais-pre-') ||
+      lower.includes('aistudio.google.com') ||
+      lower.includes('.corp.google.com') ||
+      lower.includes('googleusercontent.com')
+    );
+  };
+
+  // Helper to determine customer-facing server base URL for QR codes and public links
   const getBaseUrl = (req?: express.Request): string => {
-    // 0. Explicit runtime database/admin configured Public URL
+    const ensureHttpsForRemote = (url: string): string => {
+      const trimmed = url.replace(/\/$/, '');
+      if (trimmed.startsWith('http://') && !isInternalOrBlockedHost(trimmed)) {
+        return trimmed.replace(/^http:\/\//, 'https://');
+      }
+      return trimmed;
+    };
+
+    // 0. Explicit runtime database/admin configured Public URL (if not internal/blocked)
     const runtimeUrl = db.getPublicUrl();
-    if (runtimeUrl && !runtimeUrl.includes('localhost') && !runtimeUrl.includes('127.0.0.1')) {
-      return runtimeUrl;
+    if (runtimeUrl && !isInternalOrBlockedHost(runtimeUrl)) {
+      return ensureHttpsForRemote(runtimeUrl);
     }
-    // 1. Explicitly configured public app URL in environment
-    if (process.env.PUBLIC_APP_URL && process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL') {
-      const envUrl = process.env.PUBLIC_APP_URL.replace(/\/$/, '');
-      if (!envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-        return envUrl;
+
+    // 1. Explicitly configured public app URL in environment (if not internal/blocked)
+    if (
+      process.env.PUBLIC_APP_URL &&
+      process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL' &&
+      !isInternalOrBlockedHost(process.env.PUBLIC_APP_URL)
+    ) {
+      return ensureHttpsForRemote(process.env.PUBLIC_APP_URL);
+    }
+
+    // 2. Derive dynamically from active request host / origin headers ONLY IF public & NOT internal
+    if (req) {
+      const originHeader = (req.headers['x-smartform-origin'] as string) || (req.headers['origin'] as string);
+      if (originHeader && !originHeader.includes('chrome-extension://') && !isInternalOrBlockedHost(originHeader)) {
+        try {
+          const parsed = new URL(originHeader);
+          if (parsed.host && !isInternalOrBlockedHost(parsed.host)) {
+            return ensureHttpsForRemote(originHeader);
+          }
+        } catch {}
+      }
+      const forwardedHost = (req.headers['x-forwarded-host'] as string) || req.get('host');
+      if (forwardedHost && !isInternalOrBlockedHost(forwardedHost)) {
+        const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+        return ensureHttpsForRemote(`${proto}://${forwardedHost}`);
       }
     }
-    // 2. Derive dynamically from active request host header if available
-    if (req && req.get('host')) {
-      const host = req.get('host')!;
-      const proto = (req.headers['x-forwarded-proto'] as string) || (host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https');
-      return `${proto}://${host}`;
-    }
-    // 3. Fallback to canonical production URL
+
+    // 3. Guaranteed fallback to canonical production URL: https://sarkari-saathi.ai.studio
     return CANONICAL_PUBLIC_APP_URL;
   };
 
@@ -236,9 +273,15 @@ async function startServer() {
 
   // Public Mobile Upload Page Route - Authenticated strictly via secure single-use token (No login required)
   app.get('/upload', async (req, res) => {
-    const rawSessionId = (req.query.session as string) || '';
-    const rawUploadToken = (req.query.token as string) || '';
-    const rawDoc = (req.query.doc as string) || '';
+    const extractString = (val: any): string => {
+      if (!val) return '';
+      if (Array.isArray(val)) return String(val[0] || '');
+      return String(val);
+    };
+
+    const rawSessionId = extractString(req.query.session || req.query.sessionId);
+    const rawUploadToken = extractString(req.query.token || req.query.uploadToken);
+    const rawDoc = extractString(req.query.doc || req.query.docType);
 
     const sessionId = decodeURIComponent(rawSessionId).trim();
     let uploadToken = '';
@@ -246,6 +289,9 @@ async function startServer() {
       uploadToken = decodeURIComponent(rawUploadToken).trim().replace(/^['"]|['"]$/g, '');
     } catch {
       uploadToken = rawUploadToken.trim().replace(/^['"]|['"]$/g, '');
+    }
+    if (/^[a-f0-9]+$/i.test(uploadToken)) {
+      uploadToken = uploadToken.toLowerCase();
     }
 
     let docName = 'Required Document';
@@ -844,7 +890,10 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
   // 3. Customer Mobile Upload Endpoint: Real Document Upload & AI Verification
   app.post('/api/documents/upload', upload.single('file') as any, async (req, res) => {
     try {
-      const { session: sessionId, token: uploadToken, requirementId: requestedReqId, docType: requestedDocType } = req.body;
+      const sessionId = (req.body.session || req.body.sessionId || '').trim();
+      const uploadToken = (req.body.token || req.body.uploadToken || '').trim();
+      const requestedReqId = (req.body.requirementId || '').trim();
+      const requestedDocType = (req.body.docType || req.body.documentType || '').trim();
       const file = req.file;
 
       if (!sessionId || !uploadToken) {

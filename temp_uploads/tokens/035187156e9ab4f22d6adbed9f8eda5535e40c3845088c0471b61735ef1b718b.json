@@ -1,0 +1,15 @@
+{
+  "tokenHash": "035187156e9ab4f22d6adbed9f8eda5535e40c3845088c0471b61735ef1b718b",
+  "rawToken": "cross_1789358714603",
+  "sessionId": "cross_sess_1789358714603",
+  "applicationId": "cross_sess_1789358714603",
+  "workflowMode": "URL_PASTE",
+  "scope": "SESSION_ALL_DOCS",
+  "formUrl": "",
+  "requirementId": "ALL",
+  "expectedDocumentType": "ALL",
+  "createdAt": "2026-09-14T04:05:14.603Z",
+  "expiresAt": 1789362314603,
+  "consumedAt": null,
+  "status": "active"
+}

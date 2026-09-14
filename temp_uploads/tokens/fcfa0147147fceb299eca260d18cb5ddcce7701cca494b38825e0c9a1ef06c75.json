@@ -1,0 +1,15 @@
+{
+  "tokenHash": "fcfa0147147fceb299eca260d18cb5ddcce7701cca494b38825e0c9a1ef06c75",
+  "rawToken": "diag_dde1a4626ebeabed",
+  "sessionId": "diag_session_5c078c4f",
+  "applicationId": "diag_session_5c078c4f",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "",
+  "requirementId": "diag_req",
+  "expectedDocumentType": "Diagnostic Document",
+  "createdAt": "2026-09-14T04:06:06.842Z",
+  "expiresAt": 1789359066842,
+  "consumedAt": "2026-09-14T04:06:08.007Z",
+  "status": "consumed"
+}

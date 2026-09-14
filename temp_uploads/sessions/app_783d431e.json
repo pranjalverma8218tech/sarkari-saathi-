@@ -1,0 +1,231 @@
+{
+  "id": "app_783d431e",
+  "workflowMode": "URL_PASTE",
+  "url": "https://upsc.gov.in/apply/fresh-test",
+  "pastedUrl": "https://upsc.gov.in/apply/fresh-test",
+  "pageTitle": "General Applicant Registration Form",
+  "formActionUrl": "",
+  "inspectedAt": "2026-09-14T04:09:46.688Z",
+  "inspectionState": "active_inspected",
+  "targetOrigin": "https://upsc.gov.in",
+  "status": "waiting_documents",
+  "detectedFields": [
+    {
+      "fieldType": "text",
+      "label": "Full Name",
+      "name": "name",
+      "id": "name",
+      "selector": "input[name=\"name\"], #name",
+      "required": true
+    },
+    {
+      "fieldType": "text",
+      "label": "Father's Name",
+      "name": "father_name",
+      "id": "father_name",
+      "selector": "input[name=\"father_name\"], #father_name",
+      "required": true
+    },
+    {
+      "fieldType": "date",
+      "label": "Date of Birth",
+      "name": "dob",
+      "id": "dob",
+      "selector": "input[type=\"date\"], input[name=\"dob\"], #dob",
+      "required": true
+    },
+    {
+      "fieldType": "radio",
+      "label": "Gender",
+      "name": "gender",
+      "id": "gender_male",
+      "selector": "input[name=\"gender\"]",
+      "required": true,
+      "options": [
+        "Male",
+        "Female",
+        "Other"
+      ]
+    },
+    {
+      "fieldType": "tel",
+      "label": "Mobile Number",
+      "name": "mobile",
+      "id": "mobile",
+      "selector": "input[type=\"tel\"], input[name=\"mobile\"], #mobile",
+      "required": true
+    },
+    {
+      "fieldType": "email",
+      "label": "Email Address",
+      "name": "email",
+      "id": "email",
+      "selector": "input[type=\"email\"], input[name=\"email\"], #email",
+      "required": true
+    }
+  ],
+  "requirements": [
+    {
+      "fieldKey": "candidate_name",
+      "targetFieldIdOrName": "name",
+      "label": "Full Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from Aadhaar Card or similar ID proof",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "father_name",
+      "targetFieldIdOrName": "father_name",
+      "label": "Father's Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from 10th Marksheet or Aadhaar Card",
+      "sourceDocumentType": "10th Marksheet"
+    },
+    {
+      "fieldKey": "dob",
+      "targetFieldIdOrName": "dob",
+      "label": "Date of Birth",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from Aadhaar Card or birth certificate",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "gender",
+      "targetFieldIdOrName": "gender",
+      "label": "Gender",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Verify against ID document",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "mobile",
+      "targetFieldIdOrName": "mobile",
+      "label": "Mobile Number",
+      "required": true,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Must be provided by the applicant via verbal input or personal device",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "email",
+      "targetFieldIdOrName": "email",
+      "label": "Email Address",
+      "required": true,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Must be provided by the applicant via verbal input or personal device",
+      "sourceDocumentType": "Manual Entry"
+    }
+  ],
+  "documentRequirements": [
+    {
+      "id": "req_1_d11665",
+      "applicationId": "app_783d431e",
+      "name": "Aadhaar Card",
+      "type": "identity_document",
+      "documentType": "Aadhaar Card",
+      "required": true,
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "application/pdf"
+      ],
+      "maxSizeMB": 10,
+      "uploadToken": "0949aea5c3273ec9ea9d29f5a9c0cd53",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_783d431e&token=0949aea5c3273ec9ea9d29f5a9c0cd53",
+      "status": "pending"
+    }
+  ],
+  "sessionUploadToken": "0949aea5c3273ec9ea9d29f5a9c0cd53",
+  "sessionQrDataUrl": "data:image/png;base64,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",
+  "sessionUploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_783d431e&token=0949aea5c3273ec9ea9d29f5a9c0cd53",
+  "extractedData": [],
+  "mappings": [
+    {
+      "id": "map_0",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Full Name",
+      "targetSelector": "#name",
+      "targetId": "name",
+      "targetName": "name",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_1",
+      "source": "10th Marksheet",
+      "extractedValue": "",
+      "targetField": "Father's Name",
+      "targetSelector": "#father_name",
+      "targetId": "father_name",
+      "targetName": "father_name",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_2",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Date of Birth",
+      "targetSelector": "#dob",
+      "targetId": "dob",
+      "targetName": "dob",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_3",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Gender",
+      "targetSelector": "#gender",
+      "targetId": "gender",
+      "targetName": "gender",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_4",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Mobile Number",
+      "targetSelector": "#mobile",
+      "targetId": "mobile",
+      "targetName": "mobile",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    },
+    {
+      "id": "map_5",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Email Address",
+      "targetSelector": "#email",
+      "targetId": "email",
+      "targetName": "email",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    }
+  ],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-14T04:09:46.688Z",
+  "expiresAt": "2026-09-14T06:09:46.688Z",
+  "storagePurged": false
+}

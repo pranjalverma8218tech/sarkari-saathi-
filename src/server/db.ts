@@ -34,10 +34,12 @@ const SESSIONS_STORAGE_DIR = path.join(LOCAL_STORAGE_DIR, 'sessions');
   }
 });
 
-// Helper for hashing tokens (opaque string, no modification)
+// Helper for hashing tokens (opaque string, case-insensitive for hex)
 function hashToken(tok: string): string {
   if (!tok || typeof tok !== 'string') return '';
-  return crypto.createHash('sha256').update(tok).digest('hex');
+  const trimmed = tok.trim().replace(/^['"]|['"]$/g, '');
+  const normalized = /^[a-f0-9]+$/i.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+  return crypto.createHash('sha256').update(normalized).digest('hex');
 }
 
 // In-memory / persistent state cache for high-speed cyber café operations
@@ -125,9 +127,30 @@ if (rawSupabaseUrl && supabaseKey) {
   console.log('[Database] Supabase credentials not found in env, using secured server-side transactional storage.');
 }
 
+// Canonical production public application URL
+export const CANONICAL_PUBLIC_APP_URL = 'https://sarkari-saathi.ai.studio';
+
+export function isInternalOrBlockedHost(hostOrUrl: string): boolean {
+  if (!hostOrUrl) return true;
+  const lower = hostOrUrl.toLowerCase();
+  return (
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('ais-dev-') ||
+    lower.includes('ais-pre-') ||
+    lower.includes('aistudio.google.com') ||
+    lower.includes('.corp.google.com') ||
+    lower.includes('googleusercontent.com')
+  );
+}
+
 // Runtime-configured public URL
 let configuredCustomPublicUrl: string | null = null;
-if (process.env.PUBLIC_APP_URL && process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL') {
+if (
+  process.env.PUBLIC_APP_URL &&
+  process.env.PUBLIC_APP_URL !== 'MY_PUBLIC_APP_URL' &&
+  !isInternalOrBlockedHost(process.env.PUBLIC_APP_URL)
+) {
   configuredCustomPublicUrl = process.env.PUBLIC_APP_URL.trim().replace(/\/$/, '');
 }
 
@@ -141,12 +164,15 @@ export const db = {
   },
 
   getPublicUrl(): string {
-    return configuredCustomPublicUrl || '';
+    if (configuredCustomPublicUrl && !isInternalOrBlockedHost(configuredCustomPublicUrl)) {
+      return configuredCustomPublicUrl;
+    }
+    return CANONICAL_PUBLIC_APP_URL;
   },
 
   setPublicUrl(url: string): void {
     const cleaned = (url || '').trim().replace(/\/$/, '');
-    if (!cleaned) {
+    if (!cleaned || isInternalOrBlockedHost(cleaned)) {
       configuredCustomPublicUrl = null;
     } else {
       configuredCustomPublicUrl = cleaned;
@@ -302,6 +328,7 @@ export const db = {
 
     // 2. L1 Memory Cache (Optimization)
     inMemoryUploadTokens.set(cleanToken, record);
+    inMemoryUploadTokens.set(cleanToken.toLowerCase(), record);
     inMemoryUploadTokens.set(tokenHash, record);
 
     // 3. L2 Local Disk Cache (Optimization)
@@ -381,7 +408,11 @@ export const db = {
 
     // 2. Fallback to Local Caches if Supabase is offline or returned nothing
     if (!record) {
-      const cached = inMemoryUploadTokens.get(cleanToken) || inMemoryUploadTokens.get(tokenHash) || null;
+      const cached =
+        inMemoryUploadTokens.get(cleanToken) ||
+        inMemoryUploadTokens.get(cleanToken.toLowerCase()) ||
+        inMemoryUploadTokens.get(tokenHash) ||
+        null;
       if (cached) {
         record = cached;
         storageTier = 'L1_memory';
@@ -794,7 +825,8 @@ export async function createUnifiedUploadSession(
 ): Promise<UnifiedUploadSessionResult> {
   const sessionId = params.applicationId || 'app_' + crypto.randomUUID().slice(0, 8);
   const secureToken = crypto.randomBytes(16).toString('hex');
-  const cleanBaseUrl = (params.baseUrl || 'http://localhost:3000').trim().replace(/\/$/, '');
+  const rawBaseUrl = (params.baseUrl || db.getPublicUrl()).trim().replace(/\/$/, '');
+  const cleanBaseUrl = isInternalOrBlockedHost(rawBaseUrl) ? CANONICAL_PUBLIC_APP_URL : rawBaseUrl;
   const qrUrl = `${cleanBaseUrl}/upload?session=${sessionId}&token=${secureToken}`;
 
   const qrDataUrl = await QRCode.toDataURL(qrUrl, {

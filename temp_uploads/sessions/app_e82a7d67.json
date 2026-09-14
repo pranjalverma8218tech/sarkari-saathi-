@@ -1,0 +1,315 @@
+{
+  "id": "app_e82a7d67",
+  "workflowMode": "URL_PASTE",
+  "url": "https://upsc.gov.in/apply/civil-services-2025",
+  "pastedUrl": "https://upsc.gov.in/apply/civil-services-2025",
+  "pageTitle": "UPSC Civil Services Examination 2025 Preliminary Registration",
+  "formActionUrl": "",
+  "inspectedAt": "2026-09-14T03:54:19.256Z",
+  "inspectionState": "active_inspected",
+  "targetOrigin": "https://upsc.gov.in",
+  "status": "ready_for_review",
+  "detectedFields": [
+    {
+      "fieldType": "text",
+      "label": "Full Name",
+      "name": "name",
+      "id": "name",
+      "selector": "input[name=\"name\"], #name",
+      "required": true
+    },
+    {
+      "fieldType": "text",
+      "label": "Father's Name",
+      "name": "father_name",
+      "id": "father_name",
+      "selector": "input[name=\"father_name\"], #father_name",
+      "required": true
+    },
+    {
+      "fieldType": "date",
+      "label": "Date of Birth",
+      "name": "dob",
+      "id": "dob",
+      "selector": "input[type=\"date\"], input[name=\"dob\"], #dob",
+      "required": true
+    },
+    {
+      "fieldType": "radio",
+      "label": "Gender",
+      "name": "gender",
+      "id": "gender_male",
+      "selector": "input[name=\"gender\"]",
+      "required": true,
+      "options": [
+        "Male",
+        "Female",
+        "Other"
+      ]
+    },
+    {
+      "fieldType": "tel",
+      "label": "Mobile Number",
+      "name": "mobile",
+      "id": "mobile",
+      "selector": "input[type=\"tel\"], input[name=\"mobile\"], #mobile",
+      "required": true
+    },
+    {
+      "fieldType": "email",
+      "label": "Email Address",
+      "name": "email",
+      "id": "email",
+      "selector": "input[type=\"email\"], input[name=\"email\"], #email",
+      "required": true
+    }
+  ],
+  "requirements": [
+    {
+      "fieldKey": "candidate_name",
+      "targetFieldIdOrName": "name",
+      "label": "Full Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from Aadhaar Card or 10th Marksheet",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "father_name",
+      "targetFieldIdOrName": "father_name",
+      "label": "Father's Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from 10th Marksheet",
+      "sourceDocumentType": "10th Marksheet"
+    },
+    {
+      "fieldKey": "dob",
+      "targetFieldIdOrName": "dob",
+      "label": "Date of Birth",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from 10th Marksheet or Aadhaar Card",
+      "sourceDocumentType": "10th Marksheet"
+    },
+    {
+      "fieldKey": "gender",
+      "targetFieldIdOrName": "gender",
+      "label": "Gender",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract from Aadhaar Card",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "mobile",
+      "targetFieldIdOrName": "mobile",
+      "label": "Mobile Number",
+      "required": true,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Must be provided by the applicant, ensure it is active for OTP verification",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "email",
+      "targetFieldIdOrName": "email",
+      "label": "Email Address",
+      "required": true,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Must be provided by the applicant, ensure it is accessible for notification",
+      "sourceDocumentType": "Manual Entry"
+    }
+  ],
+  "documentRequirements": [
+    {
+      "id": "req_1_086e57",
+      "applicationId": "app_e82a7d67",
+      "name": "Aadhaar Card",
+      "type": "identity_document",
+      "documentType": "Aadhaar Card",
+      "required": true,
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "application/pdf"
+      ],
+      "maxSizeMB": 10,
+      "uploadToken": "fa2ab008585484a23f2fe069c936a70a",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "http://ais-dev-lqhtqmoi5penyocsbwnda5-655182591341.asia-southeast1.run.app/upload?session=app_e82a7d67&token=fa2ab008585484a23f2fe069c936a70a",
+      "status": "verified",
+      "detectedType": "Aadhaar Card",
+      "uploadedFileName": "Aadhaar_Card.pdf",
+      "fileSizeBytes": 123,
+      "verifiedAt": "2026-09-14T03:54:25.550Z"
+    },
+    {
+      "id": "req_2_b0f009",
+      "applicationId": "app_e82a7d67",
+      "name": "10th Marksheet",
+      "type": "education_document",
+      "documentType": "10th Marksheet",
+      "required": true,
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "application/pdf"
+      ],
+      "maxSizeMB": 10,
+      "uploadToken": "fa2ab008585484a23f2fe069c936a70a",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "http://ais-dev-lqhtqmoi5penyocsbwnda5-655182591341.asia-southeast1.run.app/upload?session=app_e82a7d67&token=fa2ab008585484a23f2fe069c936a70a",
+      "status": "verified",
+      "detectedType": "High School Marksheet",
+      "uploadedFileName": "10th_Marksheet.pdf",
+      "fileSizeBytes": 125,
+      "verifiedAt": "2026-09-14T03:54:33.076Z"
+    }
+  ],
+  "sessionUploadToken": "fa2ab008585484a23f2fe069c936a70a",
+  "sessionQrDataUrl": "data:image/png;base64,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",
+  "sessionUploadUrl": "http://ais-dev-lqhtqmoi5penyocsbwnda5-655182591341.asia-southeast1.run.app/upload?session=app_e82a7d67&token=fa2ab008585484a23f2fe069c936a70a",
+  "extractedData": [
+    {
+      "field": "candidate_name",
+      "value": "ROHAN SHARMA",
+      "source": "Aadhaar Card",
+      "confidence": 0.98
+    },
+    {
+      "field": "gender",
+      "value": "Male",
+      "source": "Aadhaar Card",
+      "confidence": 0.98
+    },
+    {
+      "field": "dob",
+      "value": "2004-08-14",
+      "source": "Aadhaar Card",
+      "confidence": 0.98
+    },
+    {
+      "field": "current_address",
+      "value": "House No 42, Sector 15, New Delhi",
+      "source": "Aadhaar Card",
+      "confidence": 0.95
+    },
+    {
+      "field": "candidate_name",
+      "value": "ROHAN SHARMA",
+      "source": "10th Marksheet",
+      "confidence": 0.95
+    },
+    {
+      "field": "father_name",
+      "value": "SURESH SHARMA",
+      "source": "10th Marksheet",
+      "confidence": 0.95
+    },
+    {
+      "field": "dob",
+      "value": "2004-08-14",
+      "source": "10th Marksheet",
+      "confidence": 0.95
+    },
+    {
+      "field": "roll_number_10th",
+      "value": "4128956",
+      "source": "10th Marksheet",
+      "confidence": 0.95
+    },
+    {
+      "field": "board_name_10th",
+      "value": "CBSE",
+      "source": "10th Marksheet",
+      "confidence": 0.95
+    }
+  ],
+  "mappings": [
+    {
+      "id": "map_001",
+      "source": "Aadhaar Card",
+      "extractedValue": "ROHAN SHARMA",
+      "targetField": "Full Name",
+      "targetSelector": "input[name=\"name\"], #name",
+      "confidence": 0.98,
+      "status": "mapped",
+      "isManualEntry": false,
+      "targetId": "name",
+      "targetName": "name"
+    },
+    {
+      "id": "map_002",
+      "source": "Aadhaar Card",
+      "extractedValue": "Male",
+      "targetField": "Gender",
+      "targetSelector": "input[name=\"gender\"]",
+      "confidence": 0.98,
+      "status": "mapped",
+      "isManualEntry": false,
+      "targetId": "gender_male",
+      "targetName": "gender"
+    },
+    {
+      "id": "map_003",
+      "source": "Aadhaar Card",
+      "extractedValue": "2004-08-14",
+      "targetField": "Date of Birth",
+      "targetSelector": "input[type=\"date\"], input[name=\"dob\"], #dob",
+      "confidence": 0.98,
+      "status": "mapped",
+      "isManualEntry": false,
+      "targetId": "dob",
+      "targetName": "dob"
+    },
+    {
+      "id": "map_004",
+      "source": "10th Marksheet",
+      "extractedValue": "SURESH SHARMA",
+      "targetField": "Father's Name",
+      "targetSelector": "input[name=\"father_name\"], #father_name",
+      "confidence": 0.95,
+      "status": "mapped",
+      "isManualEntry": false,
+      "targetId": "father_name",
+      "targetName": "father_name"
+    },
+    {
+      "id": "map_005",
+      "source": "Form",
+      "extractedValue": "",
+      "targetField": "Mobile Number",
+      "targetSelector": "input[type=\"tel\"], input[name=\"mobile\"], #mobile",
+      "confidence": 0,
+      "status": "manual_required",
+      "isManualEntry": true,
+      "targetId": "mobile",
+      "targetName": "mobile"
+    },
+    {
+      "id": "map_006",
+      "source": "Form",
+      "extractedValue": "",
+      "targetField": "Email Address",
+      "targetSelector": "input[type=\"email\"], input[name=\"email\"], #email",
+      "confidence": 0,
+      "status": "manual_required",
+      "isManualEntry": true,
+      "targetId": "email",
+      "targetName": "email"
+    }
+  ],
+  "unfilledRequiredFields": [
+    "Mobile Number",
+    "Email Address"
+  ],
+  "createdAt": "2026-09-14T03:54:19.256Z",
+  "expiresAt": "2026-09-14T05:54:19.256Z",
+  "storagePurged": false
+}
