@@ -1,0 +1,15 @@
+{
+  "tokenHash": "4a32bcfc880e3047a0cfa1d57f5e90343686f036e25a4297c3c755826fb6e727",
+  "rawToken": "bb10e37f292b5b06844236e311687585",
+  "sessionId": "test_sess_1789371676508",
+  "applicationId": "test_sess_1789371676508",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "https://upsc.gov.in/apply/civil-services",
+  "requirementId": "req_1",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-14T07:41:16.586Z",
+  "expiresAt": 1789378876586,
+  "consumedAt": null,
+  "status": "active"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "test_mode2_1789371667871",
+  "workflowMode": "EXTENSION_INSPECTION",
+  "inspectedUrl": "https://upsc.gov.in/apply/online-form/step3?id=7892",
+  "url": "https://upsc.gov.in/apply/online-form/step3?id=7892",
+  "pageTitle": "UPSC Civil Services Preliminary Application",
+  "targetTabId": 108,
+  "targetWindowId": 2,
+  "targetOrigin": "https://upsc.gov.in",
+  "status": "waiting_documents",
+  "detectedFields": [],
+  "requirements": [],
+  "documentRequirements": [],
+  "extractedData": [],
+  "mappings": [],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-14T07:41:07.871Z",
+  "expiresAt": "2026-09-14T09:41:07.871Z",
+  "storagePurged": false
+}

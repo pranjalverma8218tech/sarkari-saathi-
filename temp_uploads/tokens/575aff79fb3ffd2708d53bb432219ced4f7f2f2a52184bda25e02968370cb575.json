@@ -1,0 +1,15 @@
+{
+  "tokenHash": "575aff79fb3ffd2708d53bb432219ced4f7f2f2a52184bda25e02968370cb575",
+  "rawToken": "a6367b34f4166d59422468d8b7bfaf28",
+  "sessionId": "app_15bc1b12",
+  "applicationId": "app_15bc1b12",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "http://127.0.0.1:3000/live-test-form.html",
+  "requirementId": "req_1_142da4",
+  "expectedDocumentType": "Aadhaar Card",
+  "createdAt": "2026-09-14T07:25:12.780Z",
+  "expiresAt": 1789377912780,
+  "consumedAt": null,
+  "status": "active"
+}

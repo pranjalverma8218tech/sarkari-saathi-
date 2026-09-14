@@ -1,0 +1,15 @@
+{
+  "tokenHash": "286a6169c72af65b1c6dc8143a4524828274968e573123a531f6f97535a7cec0",
+  "rawToken": "5654366319bc2608f301e57ed172fc33",
+  "sessionId": "app_15bc1b12",
+  "applicationId": "app_15bc1b12",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "http://127.0.0.1:3000/live-test-form.html",
+  "requirementId": "req_3_a45a65",
+  "expectedDocumentType": "Passport Photograph",
+  "createdAt": "2026-09-14T07:25:13.793Z",
+  "expiresAt": 1789377913793,
+  "consumedAt": null,
+  "status": "active"
+}

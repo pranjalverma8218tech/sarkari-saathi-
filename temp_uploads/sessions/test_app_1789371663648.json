@@ -1,0 +1,15 @@
+{
+  "id": "test_app_1789371663648",
+  "workflowMode": "URL_PASTE",
+  "url": "https://example.gov.in/form",
+  "status": "created",
+  "detectedFields": [],
+  "requirements": [],
+  "documentRequirements": [],
+  "extractedData": [],
+  "mappings": [],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-14T07:41:03.648Z",
+  "expiresAt": "2026-09-14T09:41:03.648Z",
+  "storagePurged": false
+}

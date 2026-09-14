@@ -1,0 +1,15 @@
+{
+  "tokenHash": "9d78d0589cf37218b171f52866953d07bce3dc43c5e015b6fdd77b4cd8b0bd96",
+  "rawToken": "cddb6e95bbec395bdaf3ec857eb6f6a9",
+  "sessionId": "test_sess_1789371676508",
+  "applicationId": "test_sess_1789371676508",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "https://upsc.gov.in/apply/civil-services",
+  "requirementId": "req_2",
+  "expectedDocumentType": "Aadhaar Card",
+  "createdAt": "2026-09-14T07:41:17.085Z",
+  "expiresAt": 1789378877085,
+  "consumedAt": null,
+  "status": "active"
+}

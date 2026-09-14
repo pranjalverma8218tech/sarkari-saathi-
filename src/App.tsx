@@ -271,6 +271,31 @@ export default function App() {
     }
   };
 
+  // Step 3: Regenerate dedicated QR for a specific document
+  const handleRegenerateQr = async (reqId: string) => {
+    if (!session?.id) return;
+    try {
+      const res = await fetch('/api/documents/regenerate-qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: session.id,
+          requirementId: reqId,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          setSession(data.session);
+        } else {
+          await handleRefreshSession();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to regenerate QR:', err);
+    }
+  };
+
   // Step 3 -> Step 4: Proceed to Auto-Fill
   const handleProceedToAutoFill = async () => {
     if (!session?.id) return;
@@ -412,17 +437,17 @@ export default function App() {
           />
         )}
 
-        {/* Screen 3: Documents Upload with SINGLE QR Code + Multi-Document System */}
+        {/* Screen 3: Documents Upload with Dedicated QR Per Document */}
         {currentStep === 3 && session && (
           <DocumentsScreen
             formTitle={session.pageTitle || (session.detectedFields?.[0]?.label ? 'Public Application Portal' : 'Government Form')}
             documentRequirements={session.documentRequirements}
-            sessionQrDataUrl={session.sessionQrDataUrl}
-            sessionUploadUrl={session.sessionUploadUrl}
+            extractedData={session.extractedData}
             onProceedToAutoFill={handleProceedToAutoFill}
             onRefreshSession={handleRefreshSession}
             isPolling={isPolling}
             onManualUpload={handleManualOperatorUpload}
+            onRegenerateQr={handleRegenerateQr}
           />
         )}
 

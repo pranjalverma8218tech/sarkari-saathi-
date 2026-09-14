@@ -1,0 +1,344 @@
+{
+  "id": "app_b8aa34ae",
+  "workflowMode": "URL_PASTE",
+  "url": "https://demoqa.com/automation-practice-form",
+  "pastedUrl": "https://demoqa.com/automation-practice-form",
+  "pageTitle": "Student Registration Form - DemoQA",
+  "formActionUrl": "",
+  "inspectedAt": "2026-09-14T07:24:45.795Z",
+  "inspectionState": "active_inspected",
+  "targetOrigin": "https://demoqa.com",
+  "status": "waiting_documents",
+  "detectedFields": [
+    {
+      "fieldType": "text",
+      "label": "First Name",
+      "name": "firstName",
+      "id": "firstName",
+      "selector": "#firstName",
+      "required": true
+    },
+    {
+      "fieldType": "text",
+      "label": "Last Name",
+      "name": "lastName",
+      "id": "lastName",
+      "selector": "#lastName",
+      "required": true
+    },
+    {
+      "fieldType": "email",
+      "label": "Student Email",
+      "name": "userEmail",
+      "id": "userEmail",
+      "selector": "#userEmail",
+      "required": false
+    },
+    {
+      "fieldType": "radio",
+      "label": "Gender",
+      "name": "gender",
+      "id": "gender-radio-1",
+      "selector": "input[name=\"gender\"]",
+      "required": true,
+      "options": [
+        "Male",
+        "Female",
+        "Other"
+      ]
+    },
+    {
+      "fieldType": "tel",
+      "label": "Mobile Number",
+      "name": "userNumber",
+      "id": "userNumber",
+      "selector": "#userNumber",
+      "required": true
+    },
+    {
+      "fieldType": "text",
+      "label": "Date of Birth",
+      "name": "dateOfBirthInput",
+      "id": "dateOfBirthInput",
+      "selector": "#dateOfBirthInput",
+      "required": true
+    },
+    {
+      "fieldType": "text",
+      "label": "Subjects",
+      "name": "subjects",
+      "id": "subjectsInput",
+      "selector": "#subjectsInput",
+      "required": false
+    },
+    {
+      "fieldType": "checkbox",
+      "label": "Hobbies",
+      "name": "hobbies",
+      "id": "hobbies-checkbox-1",
+      "selector": "#hobbiesWrapper input[type=\"checkbox\"]",
+      "required": false,
+      "options": [
+        "Sports",
+        "Reading",
+        "Music"
+      ]
+    },
+    {
+      "fieldType": "textarea",
+      "label": "Current Address",
+      "name": "currentAddress",
+      "id": "currentAddress",
+      "selector": "#currentAddress",
+      "required": false
+    }
+  ],
+  "requirements": [
+    {
+      "fieldKey": "first_name",
+      "targetFieldIdOrName": "firstName",
+      "label": "First Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract first name from identity proof or educational certificate.",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "last_name",
+      "targetFieldIdOrName": "lastName",
+      "label": "Last Name",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract surname/last name from identity proof or educational certificate.",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "student_email",
+      "targetFieldIdOrName": "userEmail",
+      "label": "Student Email",
+      "required": false,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Enter candidate's active email address for communication.",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "gender",
+      "targetFieldIdOrName": "gender",
+      "label": "Gender",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract gender from Aadhaar Card or identity proof.",
+      "sourceDocumentType": "Aadhaar Card"
+    },
+    {
+      "fieldKey": "mobile_number",
+      "targetFieldIdOrName": "userNumber",
+      "label": "Mobile Number",
+      "required": true,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Enter candidate's 10-digit primary mobile number.",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "dob",
+      "targetFieldIdOrName": "dateOfBirthInput",
+      "label": "Date of Birth",
+      "required": true,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Verify and extract birth date matching matriculation/10th certificate or Aadhaar.",
+      "sourceDocumentType": "10th Marksheet"
+    },
+    {
+      "fieldKey": "subjects",
+      "targetFieldIdOrName": "subjectsInput",
+      "label": "Subjects",
+      "required": false,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Select or type desired subjects based on applicant preference.",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "hobbies",
+      "targetFieldIdOrName": "hobbies",
+      "label": "Hobbies",
+      "required": false,
+      "obtainableFromDocument": false,
+      "isManualEntry": true,
+      "notes": "Select relevant hobbies based on applicant choice.",
+      "sourceDocumentType": "Manual Entry"
+    },
+    {
+      "fieldKey": "current_address",
+      "targetFieldIdOrName": "currentAddress",
+      "label": "Current Address",
+      "required": false,
+      "obtainableFromDocument": true,
+      "isManualEntry": false,
+      "notes": "Extract residential address from Aadhaar Card or address proof.",
+      "sourceDocumentType": "Aadhaar Card"
+    }
+  ],
+  "documentRequirements": [
+    {
+      "id": "req_1_be4871",
+      "applicationId": "app_b8aa34ae",
+      "name": "Aadhaar Card",
+      "type": "identity_document",
+      "documentType": "Aadhaar Card",
+      "required": true,
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "application/pdf"
+      ],
+      "maxSizeMB": 10,
+      "uploadToken": "ee43044b6c862e48b19cfebd11b907a3",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_b8aa34ae&token=ee43044b6c862e48b19cfebd11b907a3&doc=Aadhaar%20Card&req=req_1_be4871",
+      "status": "pending"
+    },
+    {
+      "id": "req_2_616116",
+      "applicationId": "app_b8aa34ae",
+      "name": "10th Marksheet",
+      "type": "education_document",
+      "documentType": "10th Marksheet",
+      "required": true,
+      "acceptedMimeTypes": [
+        "image/jpeg",
+        "image/png",
+        "application/pdf"
+      ],
+      "maxSizeMB": 10,
+      "uploadToken": "694e5ccd3813d063a1e8a3e5e3d124c6",
+      "qrDataUrl": "data:image/png;base64,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",
+      "uploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_b8aa34ae&token=694e5ccd3813d063a1e8a3e5e3d124c6&doc=10th%20Marksheet&req=req_2_616116",
+      "status": "pending"
+    }
+  ],
+  "sessionUploadToken": "f59b0c1c758cc88eec536c94a05c57b0",
+  "sessionQrDataUrl": "data:image/png;base64,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",
+  "sessionUploadUrl": "https://sarkari-saathi.ai.studio/upload?session=app_b8aa34ae&token=f59b0c1c758cc88eec536c94a05c57b0",
+  "extractedData": [],
+  "mappings": [
+    {
+      "id": "map_0",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "First Name",
+      "targetSelector": "#firstName",
+      "targetId": "firstName",
+      "targetName": "firstName",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_1",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Last Name",
+      "targetSelector": "#lastName",
+      "targetId": "lastName",
+      "targetName": "lastName",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_2",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Student Email",
+      "targetSelector": "#userEmail",
+      "targetId": "userEmail",
+      "targetName": "userEmail",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    },
+    {
+      "id": "map_3",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Gender",
+      "targetSelector": "#gender",
+      "targetId": "gender",
+      "targetName": "gender",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_4",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Mobile Number",
+      "targetSelector": "#userNumber",
+      "targetId": "userNumber",
+      "targetName": "userNumber",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    },
+    {
+      "id": "map_5",
+      "source": "10th Marksheet",
+      "extractedValue": "",
+      "targetField": "Date of Birth",
+      "targetSelector": "#dateOfBirthInput",
+      "targetId": "dateOfBirthInput",
+      "targetName": "dateOfBirthInput",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    },
+    {
+      "id": "map_6",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Subjects",
+      "targetSelector": "#subjectsInput",
+      "targetId": "subjectsInput",
+      "targetName": "subjectsInput",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    },
+    {
+      "id": "map_7",
+      "source": "Manual Entry",
+      "extractedValue": "",
+      "targetField": "Hobbies",
+      "targetSelector": "#hobbies",
+      "targetId": "hobbies",
+      "targetName": "hobbies",
+      "confidence": 1,
+      "status": "manual_required",
+      "isManualEntry": true
+    },
+    {
+      "id": "map_8",
+      "source": "Aadhaar Card",
+      "extractedValue": "",
+      "targetField": "Current Address",
+      "targetSelector": "#currentAddress",
+      "targetId": "currentAddress",
+      "targetName": "currentAddress",
+      "confidence": 0,
+      "status": "attention_required",
+      "isManualEntry": false
+    }
+  ],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-14T07:24:45.795Z",
+  "expiresAt": "2026-09-14T09:24:45.795Z",
+  "storagePurged": false
+}

@@ -435,6 +435,38 @@ export const db = {
       }
     }
 
+    // 3. Fallback to active sessions (in memory and on disk) if token matches any document requirement
+    if (!record) {
+      for (const sess of inMemorySessions.values()) {
+        const found = sess.documentRequirements?.find(
+          (d) =>
+            d.uploadToken === cleanToken ||
+            d.uploadToken?.toLowerCase() === cleanToken.toLowerCase() ||
+            (d.uploadToken && hashToken(d.uploadToken) === tokenHash)
+        );
+        if (found) {
+          record = {
+            tokenHash,
+            rawToken: cleanToken,
+            sessionId: sess.id,
+            applicationId: sess.id,
+            workflowMode: sess.workflowMode,
+            scope: 'SINGLE_DOC',
+            formUrl: sess.url,
+            requirementId: found.id,
+            expectedDocumentType: found.documentType,
+            requiredDocuments: sess.documentRequirements,
+            createdAt: sess.createdAt,
+            expiresAt: new Date(sess.expiresAt).getTime() || Date.now() + 3600000,
+            consumedAt: null,
+            status: found.status === 'verified' ? 'consumed' : 'active',
+          };
+          storageTier = 'L1_memory';
+          break;
+        }
+      }
+    }
+
     if (!record) return null;
 
     // Check validity state strictly (READ-ONLY)
@@ -750,6 +782,47 @@ export const db = {
   createUnifiedUploadSession(params: CreateUnifiedSessionParams): Promise<UnifiedUploadSessionResult> {
     return createUnifiedUploadSession(params);
   },
+
+  async regenerateDocumentTokenAndQr(
+    sessionId: string,
+    requirementId: string,
+    baseUrl?: string
+  ): Promise<DocumentRequirement | null> {
+    const session = await db.getSession(sessionId);
+    if (!session) return null;
+
+    const docReq = session.documentRequirements.find((d) => d.id === requirementId);
+    if (!docReq) return null;
+
+    const rawBaseUrl = (baseUrl || db.getPublicUrl()).trim().replace(/\/$/, '');
+    const cleanBaseUrl = isInternalOrBlockedHost(rawBaseUrl) ? CANONICAL_PUBLIC_APP_URL : rawBaseUrl;
+
+    const newDocToken = crypto.randomBytes(16).toString('hex');
+    const newUploadUrl = `${cleanBaseUrl}/upload?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(newDocToken)}&doc=${encodeURIComponent(docReq.documentType)}&req=${encodeURIComponent(docReq.id)}`;
+
+    const newQrDataUrl = await QRCode.toDataURL(newUploadUrl, {
+      width: 320,
+      margin: 2,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    });
+
+    await db.registerUploadToken(newDocToken, sessionId, docReq.id, docReq.documentType, 120, {
+      workflowMode: session.workflowMode,
+      scope: 'SINGLE_DOC',
+      formUrl: session.url,
+    });
+
+    docReq.uploadToken = newDocToken;
+    docReq.uploadUrl = newUploadUrl;
+    docReq.qrDataUrl = newQrDataUrl;
+    if (docReq.status === 'rejected') {
+      docReq.status = 'pending';
+      delete docReq.rejectionReason;
+    }
+
+    await db.saveSession(session);
+    return docReq;
+  },
 };
 
 function inferDocCategory(name: string): string {
@@ -835,6 +908,10 @@ export async function createUnifiedUploadSession(
     color: { dark: '#0f172a', light: '#ffffff' },
   });
 
+  const activeUrl = params.formUrl || params.pastedUrl || params.inspectedUrl || '';
+  const nowIso = new Date().toISOString();
+  const expiresIso = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+
   const canonicalDocs: DocumentRequirement[] = [];
   const rawDocs =
     params.requiredDocuments && params.requiredDocuments.length > 0
@@ -856,6 +933,23 @@ export async function createUnifiedUploadSession(
     const reqId = typeof raw === 'object' && raw.id ? raw.id : `req_${i + 1}_${crypto.randomUUID().slice(0, 6)}`;
     const category = inferDocCategory(docName);
 
+    // Cryptographically secure token unique to THIS document requirement
+    const docToken = (typeof raw === 'object' && raw.uploadToken) ? raw.uploadToken : crypto.randomBytes(16).toString('hex');
+    const docUploadUrl = `${cleanBaseUrl}/upload?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(docToken)}&doc=${encodeURIComponent(docName)}&req=${encodeURIComponent(reqId)}`;
+
+    const docQrDataUrl = await QRCode.toDataURL(docUploadUrl, {
+      width: 320,
+      margin: 2,
+      color: { dark: '#0f172a', light: '#ffffff' },
+    });
+
+    // Register token in authoritative store (Supabase + Local Cache)
+    await db.registerUploadToken(docToken, sessionId, reqId, docName, 120, {
+      workflowMode: params.workflowMode,
+      scope: 'SINGLE_DOC',
+      formUrl: activeUrl,
+    });
+
     canonicalDocs.push({
       id: reqId,
       applicationId: sessionId,
@@ -867,9 +961,9 @@ export async function createUnifiedUploadSession(
         ? ['application/pdf']
         : ['image/jpeg', 'image/png', 'application/pdf'],
       maxSizeMB: 10,
-      uploadToken: secureToken,
-      qrDataUrl,
-      uploadUrl: qrUrl,
+      uploadToken: docToken,
+      qrDataUrl: docQrDataUrl,
+      uploadUrl: docUploadUrl,
       status: (typeof raw === 'object' && raw.status) || 'pending',
       rejectionReason: typeof raw === 'object' ? raw.rejectionReason : undefined,
       detectedType: typeof raw === 'object' ? raw.detectedType : undefined,
@@ -880,11 +974,7 @@ export async function createUnifiedUploadSession(
     });
   }
 
-  const activeUrl = params.formUrl || params.pastedUrl || params.inspectedUrl || '';
-  const nowIso = new Date().toISOString();
-  const expiresIso = new Date(Date.now() + 120 * 60 * 1000).toISOString();
-
-  // Register session-level upload token (valid for ALL documents in this session)
+  // Also register session-level upload token for overall application session
   await db.registerUploadToken(secureToken, sessionId, 'ALL', 'ALL', 120, {
     workflowMode: params.workflowMode,
     scope: 'SESSION_ALL_DOCS',

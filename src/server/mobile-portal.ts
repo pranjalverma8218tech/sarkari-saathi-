@@ -634,3 +634,391 @@ function escapeHtml(str: string): string {
     "'": '&#39;',
   })[m]);
 }
+
+export function renderSingleDocumentUploadHtml(
+  session: ApplicationSession,
+  docReq: DocumentRequirement,
+  uploadToken: string,
+  expiresAt: number
+): string {
+  const sessionId = session.id;
+  const docName = docReq.name || docReq.documentType || 'Required Document';
+  const isVerified = docReq.status === 'verified';
+  const isRejected = docReq.status === 'rejected';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Upload ${escapeHtml(docName)} - SmartForm AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background: #f1f5f9; color: #0f172a; min-height: 100vh; padding: 16px; display: flex; flex-direction: column; align-items: center; }
+    .container { width: 100%; max-width: 480px; margin: 0 auto; }
+    
+    .header { text-align: center; margin-bottom: 20px; padding-top: 10px; }
+    .logo-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #0284c7; background: #e0f2fe; padding: 5px 12px; border-radius: 9999px; margin-bottom: 12px; }
+    h1 { font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 6px; line-height: 1.25; }
+    .subtitle { font-size: 13px; color: #64748b; line-height: 1.4; }
+
+    .card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.04); margin-bottom: 16px; }
+    
+    .meta-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #f1f5f9; }
+    .app-id { font-size: 12px; font-weight: 700; color: #475569; }
+    .status-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 9999px; }
+    .badge-pending { background: #fef3c7; color: #b45309; }
+    .badge-verified { background: #dcfce7; color: #15803d; }
+    .badge-rejected { background: #fee2e2; color: #b91c1c; }
+
+    .doc-target-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 20px; }
+    .target-label { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .target-title { font-size: 17px; font-weight: 800; color: #0f172a; margin-bottom: 6px; }
+    .target-hint { font-size: 12px; color: #475569; line-height: 1.4; }
+
+    /* Upload interaction area */
+    .dropzone { border: 2px dashed #cbd5e1; border-radius: 14px; padding: 24px 16px; text-align: center; cursor: pointer; transition: all 0.2s; background: #fafafa; margin-bottom: 16px; }
+    .dropzone:active, .dropzone.hover { border-color: #0284c7; background: #f0f9ff; }
+    .drop-icon { font-size: 36px; margin-bottom: 8px; }
+    .drop-text { font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+    .drop-sub { font-size: 12px; color: #64748b; }
+
+    .buttons-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .btn-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #ffffff; border: 1px solid #cbd5e1; color: #1e293b; padding: 12px 14px; border-radius: 12px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; }
+    .btn-action:active { background: #f1f5f9; }
+
+    /* File preview card */
+    .file-preview { display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 16px; align-items: center; gap: 12px; }
+    .file-preview.show { display: flex; }
+    .preview-thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+    .preview-info { flex: 1; min-width: 0; }
+    .preview-name { font-size: 13px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .preview-size { font-size: 11px; color: #64748b; }
+    .btn-clear { background: none; border: none; font-size: 18px; color: #94a3b8; cursor: pointer; padding: 4px; }
+
+    /* Primary upload submit button */
+    .btn-submit { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #0284c7; color: #ffffff; border: none; padding: 14px 20px; font-size: 15px; font-weight: 700; border-radius: 12px; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(2,132,199,0.25); }
+    .btn-submit:hover { background: #0369a1; }
+    .btn-submit:disabled { background: #94a3b8; cursor: not-allowed; box-shadow: none; }
+
+    /* State messages */
+    .alert-box { display: none; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .alert-box.show { display: block; }
+    .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .alert-error h3 { font-size: 14px; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .alert-error p { font-size: 13px; line-height: 1.4; margin-bottom: 10px; }
+    .alert-error .detected-tag { font-weight: 700; background: #fee2e2; padding: 2px 6px; border-radius: 4px; }
+
+    .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .alert-success h3 { font-size: 15px; font-weight: 800; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .alert-success p { font-size: 13px; line-height: 1.4; margin-bottom: 12px; }
+    .extracted-table { font-size: 12px; width: 100%; border-collapse: collapse; margin-top: 8px; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #dcfce7; }
+    .extracted-table td { padding: 8px 10px; border-bottom: 1px solid #f0fdf4; }
+    .extracted-table td:first-child { font-weight: 700; color: #15803d; width: 40%; }
+
+    /* Spinner */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Progress bar */
+    .upload-progress { display: none; margin-top: 12px; height: 6px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+    .upload-progress.show { display: block; }
+    .upload-progress-bar { height: 100%; width: 0%; background: #0284c7; transition: width 0.2s linear; }
+
+    .footer { text-align: center; font-size: 12px; color: #94a3b8; margin-top: 20px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo-badge">&#128274; SmartForm AI &bull; Cyber Café Portal</div>
+      <h1>Upload ${escapeHtml(docName)}</h1>
+      <p class="subtitle">Secure Document Upload. No account or password required.</p>
+    </div>
+
+    <div class="card">
+      <div class="meta-row">
+        <span class="app-id">Application: #${escapeHtml(sessionId.slice(0, 8))}</span>
+        <span id="headerStatusBadge" class="status-badge ${isVerified ? 'badge-verified' : isRejected ? 'badge-rejected' : 'badge-pending'}">
+          ${isVerified ? '&#10004; Verified' : isRejected ? '&#9888; Wrong Document' : 'Waiting for Upload'}
+        </span>
+      </div>
+
+      <div class="doc-target-box">
+        <div class="target-label">Required Document</div>
+        <div class="target-title">${escapeHtml(docName)}</div>
+        <div class="target-hint">
+          Please upload your clear original <strong>${escapeHtml(docName)}</strong>. PDF, JPG, or PNG up to 10MB accepted.
+        </div>
+      </div>
+
+      <!-- Error / Wrong Document Alert -->
+      <div id="errorAlert" class="alert-box alert-error ${isRejected ? 'show' : ''}">
+        <h3>&#9888; Wrong Document Uploaded</h3>
+        <p id="errorAlertMsg">
+          ${isRejected ? `Wrong document. Please upload <strong>${escapeHtml(docName)}</strong> for this QR. ${escapeHtml(docReq.rejectionReason || '')}` : ''}
+        </p>
+        <button type="button" class="btn-action" style="width: 100%; background: #fee2e2; border-color: #fca5a5; color: #991b1b;" onclick="resetPicker()">
+          &#128247; Select Correct ${escapeHtml(docName)}
+        </button>
+      </div>
+
+      <!-- Success Alert -->
+      <div id="successAlert" class="alert-box alert-success ${isVerified ? 'show' : ''}">
+        <h3>&#10004; ${escapeHtml(docName)} Verified!</h3>
+        <p>
+          Your official <strong>${escapeHtml(docName)}</strong> has been verified. The cyber café operator's screen has received the extracted data.
+        </p>
+        <div id="extractedDataContainer"></div>
+      </div>
+
+      <!-- Upload Form Section (hidden if verified) -->
+      <div id="uploadSection" style="${isVerified ? 'display: none;' : 'display: block;'}">
+        <input
+          type="file"
+          id="fileInput"
+          accept="image/jpeg,image/png,image/webp,image/jpg,application/pdf"
+          capture="environment"
+          style="display:none;"
+          onchange="onFileSelected(this)"
+        />
+
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+          <div class="drop-icon">&#128247;</div>
+          <div class="drop-text">Take Photo or Choose File</div>
+          <div class="drop-sub">Tap here to open camera or browse PDF / images</div>
+        </div>
+
+        <div class="buttons-row">
+          <button type="button" class="btn-action" onclick="openCamera()">
+            &#128248; Take Photo
+          </button>
+          <button type="button" class="btn-action" onclick="openFilePicker()">
+            &#128196; Browse PDF / Files
+          </button>
+        </div>
+
+        <!-- Selected File Preview -->
+        <div class="file-preview" id="filePreview">
+          <div class="preview-thumb" id="previewThumb">&#128196;</div>
+          <div class="preview-info">
+            <div class="preview-name" id="previewName">filename.pdf</div>
+            <div class="preview-size" id="previewSize">1.2 MB</div>
+          </div>
+          <button type="button" class="btn-clear" onclick="clearSelectedFile()" title="Remove file">&times;</button>
+        </div>
+
+        <div class="upload-progress" id="uploadProgress">
+          <div class="upload-progress-bar" id="progressBar"></div>
+        </div>
+
+        <button type="button" id="btnSubmit" class="btn-submit" onclick="startUpload()" disabled>
+          &#128228; Upload & Verify ${escapeHtml(docName)}
+        </button>
+      </div>
+
+      <!-- Re-upload option if verified -->
+      <div id="reuploadSection" style="${isVerified ? 'display: block;' : 'display: none;'} margin-top: 16px; text-align: center;">
+        <button type="button" class="btn-action" style="width: 100%;" onclick="enableReupload()">
+          &#8635; Replace / Upload New Copy
+        </button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>SmartForm AI &bull; Encrypted End-to-End Document Bridge</div>
+      <div style="margin-top: 4px;">Data is purged immediately after form submission.</div>
+    </div>
+  </div>
+
+  <script>
+    var selectedFile = null;
+    var sessionId = ${JSON.stringify(sessionId)};
+    var uploadToken = ${JSON.stringify(uploadToken)};
+    var requirementId = ${JSON.stringify(docReq.id)};
+    var expectedDocType = ${JSON.stringify(docName)};
+
+    function openCamera() {
+      var input = document.getElementById('fileInput');
+      input.setAttribute('capture', 'environment');
+      input.removeAttribute('accept');
+      input.setAttribute('accept', 'image/*');
+      input.click();
+    }
+
+    function openFilePicker() {
+      var input = document.getElementById('fileInput');
+      input.removeAttribute('capture');
+      input.setAttribute('accept', 'image/jpeg,image/png,image/webp,image/jpg,application/pdf');
+      input.click();
+    }
+
+    function onFileSelected(input) {
+      if (!input.files || input.files.length === 0) return;
+      selectedFile = input.files[0];
+
+      // Hide previous alerts
+      document.getElementById('errorAlert').className = 'alert-box alert-error';
+
+      var preview = document.getElementById('filePreview');
+      var nameEl = document.getElementById('previewName');
+      var sizeEl = document.getElementById('previewSize');
+      var thumbEl = document.getElementById('previewThumb');
+
+      nameEl.textContent = selectedFile.name;
+      sizeEl.textContent = formatBytes(selectedFile.size);
+
+      if (selectedFile.type.startsWith('image/')) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          thumbEl.innerHTML = '<img src="' + e.target.result + '" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" />';
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        thumbEl.innerHTML = '&#128196;';
+      }
+
+      preview.className = 'file-preview show';
+      var btn = document.getElementById('btnSubmit');
+      btn.disabled = false;
+      btn.innerHTML = '&#128228; Upload & Verify ' + escapeHtml(expectedDocType);
+    }
+
+    function clearSelectedFile() {
+      selectedFile = null;
+      document.getElementById('fileInput').value = '';
+      document.getElementById('filePreview').className = 'file-preview';
+      var btn = document.getElementById('btnSubmit');
+      btn.disabled = true;
+      btn.innerHTML = '&#128228; Upload & Verify ' + escapeHtml(expectedDocType);
+    }
+
+    function resetPicker() {
+      clearSelectedFile();
+      document.getElementById('errorAlert').className = 'alert-box alert-error';
+      openFilePicker();
+    }
+
+    function enableReupload() {
+      document.getElementById('uploadSection').style.display = 'block';
+      document.getElementById('reuploadSection').style.display = 'none';
+      document.getElementById('successAlert').className = 'alert-box alert-success';
+      clearSelectedFile();
+    }
+
+    function startUpload() {
+      if (!selectedFile) return;
+
+      var btn = document.getElementById('btnSubmit');
+      var progress = document.getElementById('uploadProgress');
+      var bar = document.getElementById('progressBar');
+      var errAlert = document.getElementById('errorAlert');
+      var successAlert = document.getElementById('successAlert');
+
+      errAlert.className = 'alert-box alert-error';
+      successAlert.className = 'alert-box alert-success';
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Uploading & Analyzing...';
+      progress.className = 'upload-progress show';
+      bar.style.width = '30%';
+
+      var formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('session', sessionId);
+      formData.append('token', uploadToken);
+      formData.append('requirementId', requirementId);
+      formData.append('docType', expectedDocType);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/documents/upload', true);
+
+      xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+          var pct = Math.round((e.loaded / e.total) * 70);
+          bar.style.width = pct + '%';
+        }
+      };
+
+      xhr.onload = function() {
+        bar.style.width = '100%';
+        var res = {};
+        try {
+          res = JSON.parse(xhr.responseText);
+        } catch (e) {}
+
+        if (xhr.status === 200 && res.success) {
+          // Accepted and Verified!
+          document.getElementById('headerStatusBadge').className = 'status-badge badge-verified';
+          document.getElementById('headerStatusBadge').innerHTML = '&#10004; Verified';
+          
+          document.getElementById('uploadSection').style.display = 'none';
+          document.getElementById('reuploadSection').style.display = 'block';
+
+          var tableHtml = '';
+          if (res.extractedFields && res.extractedFields.length > 0) {
+            tableHtml = '<table class="extracted-table">';
+            res.extractedFields.forEach(function(f) {
+              tableHtml += '<tr><td>' + escapeHtml(f.fieldName || f.key || 'Field') + '</td><td>' + escapeHtml(f.value || '-') + '</td></tr>';
+            });
+            tableHtml += '</table>';
+          }
+          document.getElementById('extractedDataContainer').innerHTML = tableHtml;
+          successAlert.className = 'alert-box alert-success show';
+        } else if (xhr.status === 422 || res.rejected) {
+          // WRONG DOCUMENT REJECTION
+          document.getElementById('headerStatusBadge').className = 'status-badge badge-rejected';
+          document.getElementById('headerStatusBadge').innerHTML = '&#9888; Wrong Document';
+
+          var msg = 'Wrong document. Please upload <strong>' + escapeHtml(expectedDocType) + '</strong> for this QR.<br>';
+          if (res.detectedType) {
+            msg += '<div style="margin-top:6px;">Detected: <span class="detected-tag">' + escapeHtml(res.detectedType) + '</span></div>';
+          }
+          if (res.reason) {
+            msg += '<div style="margin-top:4px;font-size:12px;color:#7f1d1d;">' + escapeHtml(res.reason) + '</div>';
+          }
+          document.getElementById('errorAlertMsg').innerHTML = msg;
+          errAlert.className = 'alert-box alert-error show';
+
+          btn.disabled = false;
+          btn.innerHTML = '&#128228; Retry Upload';
+          progress.className = 'upload-progress';
+        } else {
+          // Other error
+          var errText = res.message || res.error || ('Upload failed with code ' + xhr.status);
+          document.getElementById('errorAlertMsg').innerHTML = '<strong>Upload Notice:</strong> ' + escapeHtml(errText);
+          errAlert.className = 'alert-box alert-error show';
+          btn.disabled = false;
+          btn.innerHTML = '&#128228; Retry Upload';
+          progress.className = 'upload-progress';
+        }
+      };
+
+      xhr.onerror = function() {
+        document.getElementById('errorAlertMsg').innerHTML = 'Network error during upload. Please check connection and try again.';
+        errAlert.className = 'alert-box alert-error show';
+        btn.disabled = false;
+        btn.innerHTML = '&#128228; Retry Upload';
+        progress.className = 'upload-progress';
+      };
+
+      xhr.send(formData);
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      var k = 1024;
+      var sizes = ['B', 'KB', 'MB', 'GB'];
+      var i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      return (str || '').replace(/[&<>"']/g, function(m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+      });
+    }
+  </script>
+</body>
+</html>`;
+}

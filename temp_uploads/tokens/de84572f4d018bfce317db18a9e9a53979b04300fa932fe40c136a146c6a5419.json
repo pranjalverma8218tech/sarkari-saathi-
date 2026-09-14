@@ -1,0 +1,15 @@
+{
+  "tokenHash": "de84572f4d018bfce317db18a9e9a53979b04300fa932fe40c136a146c6a5419",
+  "rawToken": "f9a8de4175bb93630d94415036e9545f",
+  "sessionId": "app_15bc1b12",
+  "applicationId": "app_15bc1b12",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "http://127.0.0.1:3000/live-test-form.html",
+  "requirementId": "req_5_4392d0",
+  "expectedDocumentType": "Income Certificate",
+  "createdAt": "2026-09-14T07:25:15.652Z",
+  "expiresAt": 1789377915652,
+  "consumedAt": null,
+  "status": "active"
+}

@@ -1,0 +1,15 @@
+{
+  "tokenHash": "d7b09f7d7fee4abc1d9f13f3bb207ea53939ca3b6fb3a499a0dcf4c0afb21f30",
+  "rawToken": "3d017f971ead38481fccac19e1258e31",
+  "sessionId": "app_15bc1b12",
+  "applicationId": "app_15bc1b12",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "http://127.0.0.1:3000/live-test-form.html",
+  "requirementId": "req_2_df4531",
+  "expectedDocumentType": "10th Marksheet",
+  "createdAt": "2026-09-14T07:25:13.243Z",
+  "expiresAt": 1789377913243,
+  "consumedAt": null,
+  "status": "active"
+}

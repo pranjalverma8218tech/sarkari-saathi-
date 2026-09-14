@@ -1,0 +1,16 @@
+{
+  "id": "test_mode1_1789369119281",
+  "workflowMode": "URL_PASTE",
+  "pastedUrl": "https://upsc.gov.in/apply/online-form",
+  "url": "https://upsc.gov.in/apply/online-form",
+  "status": "created",
+  "detectedFields": [],
+  "requirements": [],
+  "documentRequirements": [],
+  "extractedData": [],
+  "mappings": [],
+  "unfilledRequiredFields": [],
+  "createdAt": "2026-09-14T06:58:39.281Z",
+  "expiresAt": "2026-09-14T08:58:39.281Z",
+  "storagePurged": false
+}

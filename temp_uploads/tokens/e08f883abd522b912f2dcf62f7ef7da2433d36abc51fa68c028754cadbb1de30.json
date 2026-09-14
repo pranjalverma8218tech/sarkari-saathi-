@@ -1,0 +1,15 @@
+{
+  "tokenHash": "e08f883abd522b912f2dcf62f7ef7da2433d36abc51fa68c028754cadbb1de30",
+  "rawToken": "83cc5eded2d8b6b1f9ba23586d71cbd5",
+  "sessionId": "app_15bc1b12",
+  "applicationId": "app_15bc1b12",
+  "workflowMode": "URL_PASTE",
+  "scope": "SINGLE_DOC",
+  "formUrl": "http://127.0.0.1:3000/live-test-form.html",
+  "requirementId": "req_4_2315f1",
+  "expectedDocumentType": "Caste / Category Certificate",
+  "createdAt": "2026-09-14T07:25:14.211Z",
+  "expiresAt": 1789377914211,
+  "consumedAt": null,
+  "status": "active"
+}

@@ -19,7 +19,11 @@ dotenv.config();
 import { ai } from './src/server/ai.js';
 import { db } from './src/server/db.js';
 import { inspectTargetPage } from './src/server/form-inspector.js';
-import { renderErrorHtml, renderMobileUploadHtml } from './src/server/mobile-portal.js';
+import {
+  renderErrorHtml,
+  renderMobileUploadHtml,
+  renderSingleDocumentUploadHtml,
+} from './src/server/mobile-portal.js';
 import {
   ApplicationSession,
   DetectedField,
@@ -279,11 +283,13 @@ async function startServer() {
       return String(val);
     };
 
-    const rawSessionId = extractString(req.query.session || req.query.sessionId);
-    const rawUploadToken = extractString(req.query.token || req.query.uploadToken);
-    const rawDoc = extractString(req.query.doc || req.query.docType);
+    const rawSessionId = extractString(req.query.session || req.query.sessionId || req.query.appId || req.query.applicationId);
+    const rawUploadToken = extractString(req.query.token || req.query.uploadToken || req.query.secureToken);
+    const rawDoc = extractString(req.query.doc || req.query.docType || req.query.documentType || req.query.name);
+    const rawReqId = extractString(req.query.req || req.query.requirementId || req.query.reqId);
 
     const sessionId = decodeURIComponent(rawSessionId).trim();
+    const reqId = decodeURIComponent(rawReqId).trim();
     let uploadToken = '';
     try {
       uploadToken = decodeURIComponent(rawUploadToken).trim().replace(/^['"]|['"]$/g, '');
@@ -366,7 +372,15 @@ async function startServer() {
       diagnosticReason = 'TOKEN_SCOPE_INVALID';
       failureTitle = 'Invalid Token Scope';
       failureMsg = 'The token scope is invalid or unsupported.';
-    } else if (docName !== 'Required Document' && docName !== 'ALL' && tokenInfo.scope === 'SINGLE_DOC' && tokenInfo.expectedDocumentType !== 'ALL' && tokenInfo.expectedDocumentType !== docName) {
+    } else if (
+      docName !== 'Required Document' &&
+      docName !== 'ALL' &&
+      tokenInfo.scope === 'SINGLE_DOC' &&
+      tokenInfo.expectedDocumentType !== 'ALL' &&
+      tokenInfo.expectedDocumentType.toLowerCase().trim() !== docName.toLowerCase().trim() &&
+      !tokenInfo.expectedDocumentType.toLowerCase().includes(docName.toLowerCase()) &&
+      !docName.toLowerCase().includes(tokenInfo.expectedDocumentType.toLowerCase())
+    ) {
       diagnosticReason = 'DOCUMENT_PERMISSION_INVALID';
       failureTitle = 'Document Permission Denied';
       failureMsg = `This token is only authorized for ${tokenInfo.expectedDocumentType}, not ${docName}.`;
@@ -453,15 +467,47 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
       }
     }
 
+    // Locate target document requirement for this upload token or request
+    let targetReq: DocumentRequirement | undefined;
+    const reqList = session?.documentRequirements || [];
+
+    if (reqId) {
+      targetReq = reqList.find((r) => r.id === reqId);
+    }
+    if (!targetReq && tokenInfo!.requirementId && tokenInfo!.requirementId !== 'ALL') {
+      targetReq = reqList.find((r) => r.id === tokenInfo!.requirementId);
+    }
+    if (!targetReq && tokenInfo!.rawToken) {
+      targetReq = reqList.find((r) => r.uploadToken === tokenInfo!.rawToken || r.uploadToken === uploadToken);
+    }
+    if (!targetReq && tokenInfo!.expectedDocumentType && tokenInfo!.expectedDocumentType !== 'ALL') {
+      targetReq = reqList.find(
+        (r) => r.documentType.toLowerCase().trim() === tokenInfo!.expectedDocumentType.toLowerCase().trim()
+      );
+    }
+    if (!targetReq && docName && docName !== 'Required Document' && docName !== 'ALL') {
+      targetReq = reqList.find(
+        (r) => r.documentType.toLowerCase().trim() === docName.toLowerCase().trim()
+      );
+    }
+    if (!targetReq && reqList.length === 1) {
+      targetReq = reqList[0];
+    }
+
     if (isJson) {
       return res.status(200).json({
         valid: true,
         sessionId: tokenInfo!.sessionId,
         expectedType: tokenInfo!.expectedDocumentType,
-        documentRequirements: session?.documentRequirements || [],
+        targetRequirement: targetReq || null,
+        documentRequirements: targetReq ? [targetReq] : (session?.documentRequirements || []),
         expiresAt: tokenInfo!.expiresAt,
         status: tokenInfo!.status,
       });
+    }
+
+    if (targetReq && session) {
+      return res.status(200).send(renderSingleDocumentUploadHtml(session, targetReq, uploadToken, tokenInfo!.expiresAt));
     }
 
     return res.status(200).send(renderMobileUploadHtml(session, uploadToken, tokenInfo!.expiresAt));
@@ -873,7 +919,57 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
   const handleGetSession = async (req: express.Request, res: express.Response) => {
     try {
       const sessionId = req.params.id;
-      const session = await db.getSession(sessionId);
+      let session = await db.getSession(sessionId);
+
+      // If running in development / container preview, check public deployment for real-time mobile upload updates
+      if (req.hostname !== 'sarkari-saathi.ai.studio') {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2000);
+          const publicRes = await fetch(`https://sarkari-saathi.ai.studio/api/sessions/${sessionId}`, {
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (publicRes.ok) {
+            const publicSession = await publicRes.json();
+            if (publicSession && publicSession.id === sessionId) {
+              if (session) {
+                // Merge document requirements if remote has updates (e.g. verified documents)
+                let hasChanges = false;
+                if (publicSession.documentRequirements && Array.isArray(publicSession.documentRequirements)) {
+                  for (const pDoc of publicSession.documentRequirements) {
+                    const localDoc = session.documentRequirements?.find((d) => d.id === pDoc.id || d.documentType === pDoc.documentType);
+                    if (localDoc && pDoc.status === 'verified' && localDoc.status !== 'verified') {
+                      localDoc.status = 'verified';
+                      localDoc.verifiedAt = pDoc.verifiedAt;
+                      localDoc.extractedData = pDoc.extractedData;
+                      hasChanges = true;
+                    }
+                  }
+                }
+                if (publicSession.extractedData && publicSession.extractedData.length > 0) {
+                  session.extractedData = publicSession.extractedData;
+                  hasChanges = true;
+                }
+                if (publicSession.status && publicSession.status !== session.status) {
+                  session.status = publicSession.status;
+                  hasChanges = true;
+                }
+                if (hasChanges) {
+                  await db.saveSession(session);
+                }
+              } else {
+                session = publicSession;
+                await db.saveSession(session);
+              }
+            }
+          }
+        } catch {
+          // Timeout or fetch error: continue with local session state safely
+        }
+      }
 
       if (!session) {
         return res.status(404).json({ error: 'Application session not found.' });
@@ -1075,6 +1171,32 @@ TOKEN_HASH_MATCH = ${tokenInfo && tokenInfo.tokenHash === receivedTokenHash ? 'S
     } catch (err: any) {
       console.error('[API /documents/upload] Error:', err);
       res.status(500).json({ error: err.message || 'Document processing failed.' });
+    }
+  });
+
+  // 3b. Regenerate Dedicated Secure QR Code & Token for a Specific Document Requirement
+  app.post('/api/documents/regenerate-qr', async (req, res) => {
+    try {
+      const sessionId = (req.body.sessionId || req.body.session || '').trim();
+      const requirementId = (req.body.requirementId || req.body.reqId || '').trim();
+
+      if (!sessionId || !requirementId) {
+        return res.status(400).json({ error: 'Session ID and requirement ID are required.' });
+      }
+
+      const updated = await db.regenerateDocumentTokenAndQr(sessionId, requirementId, getBaseUrl(req));
+      if (!updated) {
+        return res.status(404).json({ error: 'Requirement or session not found.' });
+      }
+
+      const session = await db.getSession(sessionId);
+      res.json({
+        success: true,
+        requirement: updated,
+        session,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

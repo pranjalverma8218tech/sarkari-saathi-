@@ -46,7 +46,7 @@ export class GeminiProvider implements AIProvider {
 
   private async generateWithFallback(options: any) {
     const client = this.getClient();
-    const models = ['gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
     let lastError: any = null;
 
     for (const model of models) {
